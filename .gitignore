@@ -1,0 +1,14 @@
+# Bytecode Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Fichiers de sortie (données d'enquête potentiellement sensibles)
+*.json
+
+# Fichiers texte de cibles — sauf requirements.txt
+*.txt
+!requirements.txt
+
+# Historique de session Claude
+.claude/

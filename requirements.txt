@@ -1,0 +1,10 @@
+# ThreatHunting — dépendances Python
+# Installation : pip install -r requirements.txt
+#
+# Python 3.10+ requis (syntaxe `set | None` dans les annotations de type).
+#
+# Toutes les autres dépendances (urllib, json, argparse, hashlib, base64, re,
+# concurrent.futures, pathlib, getpass) font partie de la stdlib Python 3.10+.
+
+# Chiffrement des clés API : Fernet (AES-128-CBC + HMAC-SHA256) + PBKDF2-HMAC-SHA256
+cryptography>=41.0.0
