@@ -207,12 +207,21 @@ main{
 }
 .chip:hover{border-color:var(--accent);color:var(--accent)}
 
-/* ── result ── */
+/* ── summary bar ── */
+.summary-bar{
+  display:none;align-items:center;justify-content:space-between;
+  font-size:.75rem;color:var(--dim);padding:2px 4px;
+}
+.summary-bar.on{display:flex}
+
+/* ── results list ── */
+#results-list{display:flex;flex-direction:column;gap:14px}
+
+/* ── result card ── */
 .result{
-  display:none;background:var(--surface);
+  background:var(--surface);
   border:1px solid var(--border);border-radius:10px;overflow:hidden;
 }
-.result.on{display:block}
 .result-hd{
   padding:9px 16px;border-bottom:1px solid var(--border);
   display:flex;align-items:center;justify-content:space-between;
@@ -297,39 +306,33 @@ footer{
 
   <div class="history" id="hist"></div>
 
-  <div class="result" id="res">
-    <div class="result-hd">
-      <span class="tgt" id="res-tgt"></span>
-      <span class="hd-right">
-        <span id="res-badge"></span>
-        <button class="dl-btn" id="dl-btn" style="display:none">↓ JSON</button>
-      </span>
-    </div>
-    <div class="result-body">
-      <pre id="res-pre"></pre>
-    </div>
+  <div class="summary-bar" id="summary-bar">
+    <span id="summary-txt"></span>
+    <button class="dl-btn" id="dl-btn">↓ JSON</button>
   </div>
+
+  <div id="results-list"></div>
 </main>
 
 <footer>ThreatHunting — interface locale · 127.0.0.1 uniquement · Made by hsa5</footer>
 
 <script>
-const form     = document.getElementById('f');
-const btn      = document.getElementById('btn');
-const ldr      = document.getElementById('loader');
-const lmsg     = document.getElementById('lmsg');
-const err      = document.getElementById('err');
-const res      = document.getElementById('res');
-const pre      = document.getElementById('res-pre');
-const resTgt   = document.getElementById('res-tgt');
-const resBadge = document.getElementById('res-badge');
-const hist     = document.getElementById('hist');
-const ftxt     = document.getElementById('ftxt');
-const uploadBtn= document.getElementById('upload-btn');
-const fbadge   = document.getElementById('fbadge');
-const fnameEl  = document.getElementById('fname');
-const fclr     = document.getElementById('fclr');
-const dlBtn    = document.getElementById('dl-btn');
+const form       = document.getElementById('f');
+const btn        = document.getElementById('btn');
+const ldr        = document.getElementById('loader');
+const lmsg       = document.getElementById('lmsg');
+const err        = document.getElementById('err');
+const hist       = document.getElementById('hist');
+const ftxt       = document.getElementById('ftxt');
+const uploadBtn  = document.getElementById('upload-btn');
+const fbadge     = document.getElementById('fbadge');
+const fnameEl    = document.getElementById('fname');
+const fclr       = document.getElementById('fclr');
+const dlBtn      = document.getElementById('dl-btn');
+const summaryBar = document.getElementById('summary-bar');
+const summaryTxt = document.getElementById('summary-txt');
+const resultsList= document.getElementById('results-list');
+const esc = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 
 let lastRawData = null;
 
@@ -438,8 +441,8 @@ form.addEventListener('submit', async e => {
   btn.disabled = true;
   startLoader();
   err.classList.remove('on');
-  res.classList.remove('on');
-  dlBtn.style.display = 'none';
+  resultsList.innerHTML = '';
+  summaryBar.classList.remove('on');
   lastRawData = null;
 
   try {
@@ -450,20 +453,29 @@ form.addEventListener('submit', async e => {
       err.textContent = '⚠  ' + data.error;
       err.classList.add('on');
     } else {
-      resTgt.textContent = data.target_label || target;
-      resBadge.innerHTML = data.cached
-        ? '<span class="cached-badge">cache</span>'
-        : '';
-      pre.innerHTML = data.html;
-      res.classList.add('on');
-
-      // JSON download
-      if (data.raw && data.raw.length) {
-        lastRawData = data.raw;
-        dlBtn.style.display = 'inline-block';
+      // Crée une carte par cible
+      for (const block of (data.blocks || [])) {
+        const card = document.createElement('div');
+        card.className = 'result';
+        card.innerHTML =
+          `<div class="result-hd">` +
+            `<span class="tgt">${esc(block.target)}</span>` +
+            `<span class="hd-right">${block.cached ? '<span class="cached-badge">cache</span>' : ''}</span>` +
+          `</div>` +
+          `<div class="result-body"><pre></pre></div>`;
+        card.querySelector('pre').innerHTML = block.html;
+        resultsList.appendChild(card);
       }
 
-      // history — only for single-line targets
+      // Barre de résumé + bouton JSON
+      if (data.raw && data.raw.length) {
+        lastRawData = data.raw;
+        const n = (data.blocks || []).length;
+        summaryTxt.textContent = n > 1 ? `${n} cibles analysées` : '';
+        summaryBar.classList.add('on');
+      }
+
+      // History — cible unique seulement
       const lines = target.split('\n').map(l => l.trim()).filter(Boolean);
       if (!hasFile && lines.length === 1) pushHistory(lines[0]);
     }
@@ -543,11 +555,12 @@ def create_app(keys: dict, cache: dict | None, fns: dict, port: int):
             n = len(targets)
             target_label = targets[0] if n == 1 else f"{n} cibles"
 
-        buf         = io.StringIO()
+        blocks      = []
         all_results = []
-        try:
-            with redirect_stdout(buf):
-                for tgt in targets:
+        for tgt in targets:
+            buf = io.StringIO()
+            try:
+                with redirect_stdout(buf):
                     if fns['is_hash'](tgt):
                         res = fns['hash']([tgt], keys, cache=active_cache)
                         if res:
@@ -556,17 +569,24 @@ def create_app(keys: dict, cache: dict | None, fns: dict, port: int):
                         res = fns['correlation'](tgt, keys, years=years, cache=active_cache)
                         if res:
                             all_results.append(res)
-        except Exception as e:
-            return jsonify({'error': str(e)}), 500
-
-        output = buf.getvalue()
-        cached = '(cache)' in output
+            except Exception as e:
+                blocks.append({
+                    'target': tgt,
+                    'html':   f'<span style="color:#f85149">Erreur : {e}</span>',
+                    'cached': False,
+                })
+                continue
+            output = buf.getvalue()
+            blocks.append({
+                'target': tgt,
+                'html':   _ansi_to_html(output),
+                'cached': '(cache)' in output,
+            })
 
         return jsonify({
-            'html':         _ansi_to_html(output),
-            'cached':       cached,
-            'target_label': target_label,
+            'blocks':       blocks,
             'raw':          all_results,
+            'target_label': target_label,
         })
 
     return app
