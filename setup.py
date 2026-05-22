@@ -314,7 +314,7 @@ def setup_cache():
     print(f"  {c('Durée actuelle :', DIM)} {c(_fmt_duration(current), WHITE)}")
     print(f"  {c('Unités : h (heures)  j (jours)  sem (semaines)  ex: 48h  2j  1sem', DIM)}")
     print()
-    raw = input(c("  Durée du cache  [Entrée = 24h] › ", CYAN)).strip()
+    raw = input(c("  Durée du cache  (24h par défaut) › ", CYAN)).strip()
     if not raw:
         ttl = 86400
     else:

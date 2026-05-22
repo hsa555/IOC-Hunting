@@ -1,5 +1,5 @@
 ## 2026-05-22
-- Cache des résultats avec durée configurable via `setup.py` (défaut 24h) — supporte `h`, `j`, `sem` (ex: `48h`, `2j`, `1sem`)
+- Cache des résultats avec durée configurable via `setup.py` (24h par défaut, Entrée pour valider) — supporte `h`, `j`, `sem` (ex: `48h`, `2j`, `1sem`)
 - Écriture atomique du cache (`.tmp` + `os.replace`) — plus de corruption sur Ctrl+C
 - Purge automatique au lancement des entrées expirées (> 24h)
 - Avertissement + prompt de vidage si le cache dépasse 500 entrées
