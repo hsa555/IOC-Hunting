@@ -275,6 +275,35 @@ main{
   line-height:1.7;white-space:pre-wrap;word-break:break-all;
 }
 
+/* ── side nav ── */
+.side-nav{
+  position:fixed;
+  top:50%;transform:translateY(-50%);
+  /* reste à gauche du bloc main centré (880px max + 16px gap) */
+  left:max(8px, calc(50vw - 612px));
+  width:154px;
+  display:none;flex-direction:column;gap:4px;
+  z-index:50;
+}
+.side-nav.on{display:flex}
+/* masqué si pas assez de place (évite le chevauchement) */
+@media(max-width:1160px){.side-nav{display:none!important}}
+.sn-item{
+  background:var(--surface);border:1px solid var(--border2);
+  border-radius:6px;padding:5px 10px;
+  font-size:.68rem;color:var(--dim);cursor:pointer;
+  transition:border-color .15s,color .15s,background .15s;
+  display:flex;align-items:center;gap:6px;overflow:hidden;
+}
+.sn-item:hover{border-color:var(--accent);color:var(--accent)}
+.sn-item.active{
+  border-color:var(--accent);
+  background:#1f3a5f44;color:var(--accent);
+}
+.sn-item .sn-num{font-size:.6rem;color:var(--border2);flex-shrink:0}
+.sn-item.active .sn-num{color:var(--accent)}
+.sn-item .sn-tgt{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
 /* ── scroll-to-top ── */
 .scroll-top{
   position:fixed;bottom:24px;left:24px;
@@ -360,6 +389,7 @@ footer{
   <div id="results-list"></div>
 </main>
 
+<div class="side-nav" id="side-nav"></div>
 <div class="scroll-top" id="scroll-top" title="Retour en haut">↑</div>
 
 <footer>ThreatHunting — interface locale · 127.0.0.1 uniquement · Made by hsa5</footer>
@@ -382,6 +412,8 @@ const summaryTxt = document.getElementById('summary-txt');
 const navList    = document.getElementById('nav-list');
 const resultsList= document.getElementById('results-list');
 const scrollTop  = document.getElementById('scroll-top');
+const sideNav    = document.getElementById('side-nav');
+let cardObserver = null;
 const esc = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 
 // ── scroll-to-top ──
@@ -389,6 +421,40 @@ window.addEventListener('scroll', () => {
   scrollTop.classList.toggle('visible', window.scrollY > 300);
 });
 scrollTop.onclick = () => window.scrollTo({top: 0, behavior: 'smooth'});
+
+// ── side nav ──
+function buildSideNav(blocks) {
+  sideNav.innerHTML = '';
+  if (blocks.length <= 1) { sideNav.classList.remove('on'); return; }
+
+  blocks.forEach((block, i) => {
+    const item = document.createElement('div');
+    item.className = 'sn-item';
+    item.innerHTML = `<span class="sn-num">#${i + 1}</span><span class="sn-tgt">${esc(block.target)}</span>`;
+    item.title     = block.target;
+    item.onclick   = () =>
+      document.getElementById(`result-card-${i}`)
+        .scrollIntoView({behavior:'smooth', block:'start'});
+    sideNav.appendChild(item);
+  });
+  sideNav.classList.add('on');
+
+  // Surligne l'item correspondant à la carte visible
+  if (cardObserver) cardObserver.disconnect();
+  cardObserver = new IntersectionObserver(entries => {
+    entries.forEach(e => {
+      if (!e.isIntersecting) return;
+      const idx = parseInt(e.target.id.split('-').pop());
+      sideNav.querySelectorAll('.sn-item').forEach((el, i) =>
+        el.classList.toggle('active', i === idx));
+    });
+  }, {threshold: 0.3});
+
+  blocks.forEach((_, i) => {
+    const card = document.getElementById(`result-card-${i}`);
+    if (card) cardObserver.observe(card);
+  });
+}
 
 let lastRawData = null;
 
@@ -501,6 +567,9 @@ form.addEventListener('submit', async e => {
   navList.innerHTML = '';
   navList.classList.remove('on');
   summaryBar.classList.remove('on');
+  sideNav.innerHTML = '';
+  sideNav.classList.remove('on');
+  if (cardObserver) { cardObserver.disconnect(); cardObserver = null; }
   lastRawData = null;
 
   try {
@@ -527,6 +596,9 @@ form.addEventListener('submit', async e => {
         card.querySelector('pre').innerHTML = block.html;
         resultsList.appendChild(card);
       });
+
+      // Barre latérale fixe
+      buildSideNav(blocks);
 
       // Nav cliquable (affiché seulement pour plusieurs cibles)
       if (blocks.length > 1) {
