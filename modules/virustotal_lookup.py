@@ -32,9 +32,28 @@ import argparse
 import base64
 import re
 import time
+import glob
 import urllib.request
 import urllib.parse
 import urllib.error
+
+try:
+    import readline as _readline
+    def _input_path(prompt):
+        def _completer(text, state):
+            matches = glob.glob(os.path.expanduser(text) + '*')
+            matches = [m + os.sep if os.path.isdir(m) else m for m in matches]
+            return matches[state] if state < len(matches) else None
+        _readline.set_completer(_completer)
+        _readline.set_completer_delims(' \t\n')
+        _readline.parse_and_bind('tab: complete')
+        try:
+            return input(prompt).strip()
+        finally:
+            _readline.set_completer(None)
+except ImportError:
+    def _input_path(prompt):
+        return input(prompt).strip()
 
 import sys as _sys, os as _os
 _path = _os.path.join(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))), ".internal")
@@ -730,7 +749,7 @@ def menu_interactif(api_key):
             menu_interactif(api_key); break
 
         elif choix == "3":
-            path = input(c("  Chemin du fichier › ", CYAN)).strip()
+            path = _input_path(c("  Chemin du fichier › ", CYAN))
             try:
                 with open(path) as fh:
                     targets = [l.strip() for l in fh if l.strip() and not l.startswith("#")]
@@ -738,7 +757,7 @@ def menu_interactif(api_key):
                 print(c(f"  Fichier introuvable : {path}", RED)); continue
             if not targets: print(c("  Fichier vide.", DIM)); continue
             as_json = input(c("  Sortie JSON ? (o/N) › ", DIM)).strip().lower() == "o"
-            export  = input(c("  Fichier export JSON (vide = pas) › ", DIM)).strip() or None
+            export  = _input_path(c("  Fichier export JSON (vide = pas) › ", DIM)) or None
             full    = input(c("  Mode complet (files/SSL/DNS) ? (o/N) › ", DIM)).strip().lower() == "o"
             print()
             run_lookup(targets, api_key, as_json=as_json, export=export, full=full)

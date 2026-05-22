@@ -35,10 +35,29 @@ import re
 import time
 import datetime
 import hashlib
+import glob
 import urllib.parse
 import urllib.request
 import urllib.error
 from concurrent.futures import ThreadPoolExecutor, as_completed
+
+try:
+    import readline as _readline
+    def _input_path(prompt):
+        def _completer(text, state):
+            matches = glob.glob(os.path.expanduser(text) + '*')
+            matches = [m + os.sep if os.path.isdir(m) else m for m in matches]
+            return matches[state] if state < len(matches) else None
+        _readline.set_completer(_completer)
+        _readline.set_completer_delims(' \t\n')
+        _readline.parse_and_bind('tab: complete')
+        try:
+            return input(prompt).strip()
+        finally:
+            _readline.set_completer(None)
+except ImportError:
+    def _input_path(prompt):
+        return input(prompt).strip()
 
 _internal_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".internal")
 if _internal_path not in sys.path:
@@ -1117,7 +1136,7 @@ def _ask_ip_targets_interactive():
         return None
 
     if method == "2":
-        path = input(c("  Chemin (fichier ou répertoire) › ", CYAN)).strip()
+        path = _input_path(c("  Chemin (fichier ou répertoire) › ", CYAN))
         p = os.path.abspath(path)
         if not os.path.exists(p):
             print(c(f"  Chemin introuvable : {path}", RED))
@@ -1184,7 +1203,7 @@ def _ask_hash_targets_interactive():
         return None
 
     if method == "2":
-        path = input(c("  Chemin (fichier ou répertoire) › ", CYAN)).strip()
+        path = _input_path(c("  Chemin (fichier ou répertoire) › ", CYAN))
         files = _collect_files(path)
         if not files:
             if not os.path.exists(os.path.abspath(path)):
@@ -1240,7 +1259,7 @@ def _run_ip_interactive(keys: dict, years):
     yr_in = input(c("  Filtrer VT files par année(s) ? ex: 2025  (vide = tout) › ", DIM)).strip()
     if yr_in:
         years = parse_years(yr_in)
-    export = input(c("  Fichier export JSON (vide = pas d'export) › ", DIM)).strip() or None
+    export = _input_path(c("  Fichier export JSON (vide = pas d'export) › ", DIM)) or None
     missing = [svc for svc, k in keys.items() if not k]
     if missing:
         print(c(f"\n  Clés manquantes : {', '.join(missing)}", YELLOW))
@@ -1278,7 +1297,7 @@ def _run_hash_interactive(keys: dict):
             if retry != "n":
                 continue
             break
-        export = input(c("  Fichier export JSON (vide = pas d'export) › ", DIM)).strip() or None
+        export = _input_path(c("  Fichier export JSON (vide = pas d'export) › ", DIM)) or None
         run_hash_correlation(targets, keys, export_path=export)
 
         print()
