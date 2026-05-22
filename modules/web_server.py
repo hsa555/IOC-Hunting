@@ -31,6 +31,9 @@ _ANSI_STYLES = {
 }
 
 def _ansi_to_html(text: str) -> str:
+    """Convertit les séquences ANSI couleur en <span style="...">.
+    stack compte les spans ouverts : un reset (\033[0m) les ferme tous d'un coup,
+    ce qui évite d'avoir à parser la hiérarchie d'imbrication."""
     result = []
     stack  = 0
     pos    = 0
@@ -55,6 +58,7 @@ def _ansi_to_html(text: str) -> str:
 # ── utilitaire port ────────────────────────────────────────────────────────────
 
 def is_port_available(port: int) -> bool:
+    """Teste si le port TCP est libre sur 127.0.0.1 (connect_ex = 0 → occupé)."""
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.settimeout(1)
         return s.connect_ex(('127.0.0.1', port)) != 0
@@ -216,20 +220,28 @@ main{
 
 /* ── nav ── */
 .nav-list{
-  display:none;flex-wrap:wrap;gap:6px;
+  display:none;flex-wrap:wrap;gap:6px;align-items:center;
   padding:10px 14px;
   background:var(--surface);border:1px solid var(--border);
   border-radius:8px;
 }
 .nav-list.on{display:flex}
+.nav-label{font-size:.68rem;color:var(--dim);margin-right:4px;flex-shrink:0}
 .nav-chip{
   background:var(--bg);border:1px solid var(--border2);
-  border-radius:20px;padding:3px 12px;
+  border-radius:6px;padding:4px 10px;
   font-size:.72rem;color:var(--dim);cursor:pointer;
-  transition:border-color .15s,color .15s;user-select:none;
-  max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  transition:border-color .15s,color .15s,background .15s;user-select:none;
+  max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  display:flex;align-items:center;gap:6px;
 }
-.nav-chip:hover{border-color:var(--accent);color:var(--accent)}
+.nav-chip:hover{border-color:var(--accent);color:var(--accent);background:#1f3a5f22}
+.nav-chip .nav-num{
+  font-size:.62rem;color:var(--border2);flex-shrink:0;
+}
+.nav-chip .nav-cached{
+  font-size:.58rem;color:var(--green);flex-shrink:0;
+}
 
 /* ── results list ── */
 #results-list{display:flex;flex-direction:column;gap:14px}
@@ -262,6 +274,19 @@ main{
   font-family:inherit;font-size:.8rem;
   line-height:1.7;white-space:pre-wrap;word-break:break-all;
 }
+
+/* ── scroll-to-top ── */
+.scroll-top{
+  position:fixed;bottom:24px;left:24px;
+  width:36px;height:36px;border-radius:50%;
+  background:var(--surface);border:1px solid var(--border2);
+  color:var(--dim);font-size:1rem;line-height:36px;text-align:center;
+  cursor:pointer;opacity:0;pointer-events:none;
+  transition:opacity .25s,border-color .15s,color .15s;
+  user-select:none;z-index:99;
+}
+.scroll-top.visible{opacity:1;pointer-events:auto}
+.scroll-top:hover{border-color:var(--accent);color:var(--accent)}
 
 /* ── footer ── */
 footer{
@@ -328,10 +353,14 @@ footer{
     <button class="dl-btn" id="dl-btn">↓ JSON</button>
   </div>
 
-  <div class="nav-list" id="nav-list"></div>
+  <div class="nav-list" id="nav-list">
+    <span class="nav-label">Aller à →</span>
+  </div>
 
   <div id="results-list"></div>
 </main>
+
+<div class="scroll-top" id="scroll-top" title="Retour en haut">↑</div>
 
 <footer>ThreatHunting — interface locale · 127.0.0.1 uniquement · Made by hsa5</footer>
 
@@ -352,7 +381,14 @@ const summaryBar = document.getElementById('summary-bar');
 const summaryTxt = document.getElementById('summary-txt');
 const navList    = document.getElementById('nav-list');
 const resultsList= document.getElementById('results-list');
+const scrollTop  = document.getElementById('scroll-top');
 const esc = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+
+// ── scroll-to-top ──
+window.addEventListener('scroll', () => {
+  scrollTop.classList.toggle('visible', window.scrollY > 300);
+});
+scrollTop.onclick = () => window.scrollTo({top: 0, behavior: 'smooth'});
 
 let lastRawData = null;
 
@@ -492,14 +528,19 @@ form.addEventListener('submit', async e => {
         resultsList.appendChild(card);
       });
 
-      // Nav de navigation (affiché seulement pour plusieurs cibles)
+      // Nav cliquable (affiché seulement pour plusieurs cibles)
       if (blocks.length > 1) {
+        // Vide les chips précédents mais garde le label "Aller à →"
+        Array.from(navList.querySelectorAll('.nav-chip')).forEach(el => el.remove());
         blocks.forEach((block, i) => {
           const chip = document.createElement('span');
-          chip.className   = 'nav-chip';
-          chip.textContent = block.target;
-          chip.title       = block.target;
-          chip.onclick     = () => {
+          chip.className = 'nav-chip';
+          chip.title     = block.target;
+          chip.innerHTML =
+            `<span class="nav-num">#${i + 1}</span>` +
+            `<span>${esc(block.target)}</span>` +
+            (block.cached ? `<span class="nav-cached">cache</span>` : '');
+          chip.onclick = () => {
             document.getElementById(`result-card-${i}`)
               .scrollIntoView({behavior: 'smooth', block: 'start'});
           };
@@ -537,13 +578,11 @@ form.addEventListener('submit', async e => {
 _CSRF_TOKEN = secrets.token_urlsafe(32)
 
 def create_app(keys: dict, cache: dict | None, fns: dict, port: int):
-    """
-    fns = {
-        'correlation' : run_correlation,
-        'hash'        : run_hash_correlation,
-        'is_hash'     : is_hash,
-        'parse_years' : parse_years,
-    }
+    """Crée et retourne l'application Flask.
+    keys  : dict des clés API déchiffrées (transmis par main.py).
+    cache : dict partagé du cache disque — None si --nocache.
+    fns   : {'correlation', 'hash', 'is_hash', 'parse_years'} — fonctions de main.py.
+    port  : utilisé uniquement pour l'injection dans le template HTML.
     """
     if Flask is None:
         raise RuntimeError("Flask manquant — lance : pip install flask")
@@ -565,7 +604,7 @@ def create_app(keys: dict, cache: dict | None, fns: dict, port: int):
         active_cache = None if nocache else cache
         years        = fns['parse_years'](year_str) if year_str else None
 
-        # Fichier .txt prioritaire sur la saisie texte
+        # Fichier .txt prioritaire sur la saisie texte (multipart/form-data)
         uploaded = request.files.get('targets_file')
         if uploaded and uploaded.filename:
             raw_text = uploaded.stream.read().decode('utf-8', errors='replace')
@@ -580,10 +619,10 @@ def create_app(keys: dict, cache: dict | None, fns: dict, port: int):
             raw_input = (request.form.get('target') or '').strip()
             if not raw_input:
                 return jsonify({'error': 'Cible vide'}), 400
-            # Supporte plusieurs cibles séparées par des sauts de ligne
+            # Textarea multi-lignes : une cible par ligne, # = commentaire
             lines = [l.strip() for l in raw_input.splitlines()
                      if l.strip() and not l.startswith('#')]
-            # Détecte les cibles séparées par des espaces sur une même ligne
+            # Validation serveur (doublon de la validation JS, filet de sécurité)
             for line in lines:
                 if ' ' in line:
                     return jsonify({
@@ -596,6 +635,7 @@ def create_app(keys: dict, cache: dict | None, fns: dict, port: int):
             n = len(targets)
             target_label = targets[0] if n == 1 else f"{n} cibles"
 
+        # Capture stdout par cible pour obtenir un bloc HTML indépendant par carte
         blocks      = []
         all_results = []
         for tgt in targets:
@@ -621,7 +661,7 @@ def create_app(keys: dict, cache: dict | None, fns: dict, port: int):
             blocks.append({
                 'target': tgt,
                 'html':   _ansi_to_html(output),
-                'cached': '(cache)' in output,
+                'cached': '(cache)' in output,  # détecté depuis la sortie texte de render_summary
             })
 
         return jsonify({

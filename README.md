@@ -40,7 +40,7 @@ Outil de threat hunting en ligne de commande qui corrèle automatiquement plusie
 - **Hachage local de fichiers** : calcule le SHA256 de fichiers/répertoires locaux, puis les interroge
 - **Scan de répertoire** : si un répertoire est fourni à la place d'un fichier, tous les fichiers sont traités
 - **Cache des résultats** : évite de reconsommer du quota API — durée configurable via `setup.py` (24h par défaut), purgé automatiquement au lancement. Option `--nocache` pour forcer des requêtes fraîches
-- **Interface web locale** (`--web`) : UI dark-theme dans le navigateur, bind uniquement sur 127.0.0.1, protection CSRF
+- **Interface web locale** (`--web`) : UI dark-theme dans le navigateur, bind uniquement sur 127.0.0.1, protection CSRF, une carte de résultat par cible, nav cliquable pour multi-cibles, téléchargement JSON
 - **Chiffrement des clés API** : Fernet/AES-128-CBC + PBKDF2-HMAC-SHA256 (480 000 itérations)
 - **Export JSON** du rapport complet
 - **Ctrl+C propre** : message d'arrêt au lieu d'une traceback
@@ -128,10 +128,14 @@ python3 main.py --web
 ```
 
 - Bind sur 127.0.0.1 uniquement — jamais exposé sur le réseau
-- Protection CSRF sur chaque soumission
+- Protection CSRF sur chaque soumission (token généré au lancement)
 - Résultats colorés (ANSI → HTML), identiques au terminal
+- **Multi-cibles** : textarea multi-lignes (une cible par ligne) ou chargement d'un fichier `.txt`
+- Une carte de résultat par cible, avec nav cliquable pour scroller directement à une carte
+- Bouton `↓ JSON` pour télécharger tous les résultats au format JSON
 - Historique des 10 dernières analyses dans `localStorage`
-- Option "Ignorer le cache" et filtre année disponibles
+- Options "Ignorer le cache" et filtre année disponibles
+- Validation : erreur si plusieurs cibles sur une même ligne (séparées par espace)
 
 > **Note** : nécessite Flask (`pip install flask` ou `pip install -r requirements.txt`). Ne jamais lancer en root sur un serveur partagé.
 
@@ -152,9 +156,10 @@ Si un **répertoire** est fourni, tous les fichiers qu'il contient sont hashés 
 python3 main.py
 ```
 
-Affiche un menu principal avec deux modes :
+Affiche un menu principal avec trois modes :
 - **1 — IP / URL** : saisie directe, fichier ou répertoire
 - **2 — Hash** : saisie de hash ou hachage de fichiers
+- **w — Interface web** : lance le serveur local dans le navigateur
 - **r — Retour** disponible dans chaque sous-menu pour revenir au menu principal
 
 ### Configuration des clés API

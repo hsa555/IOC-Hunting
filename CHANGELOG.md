@@ -1,3 +1,12 @@
+## 2026-05-22 (web — améliorations UI)
+- Interface web : textarea multi-lignes — plusieurs cibles saisies une par ligne
+- Upload `.txt` : bouton "Charger .txt", une cible par ligne, `#` = commentaire
+- Résultats : une carte séparée par cible au lieu d'un seul bloc monolithique
+- Nav de navigation (chips cliquables) affiché au-dessus des cartes en mode multi-cibles
+- Bouton `↓ JSON` pour télécharger tous les résultats en JSON (Blob URL côté client)
+- Entrées malformées (`1.2.3.4 5.6.7.8` sur une ligne) : erreur immédiate, jamais mises en cache
+- Option `w` dans le menu interactif (`python3 main.py`) pour lancer l'interface web
+
 ## 2026-05-22 (web)
 - Interface web locale `--web` : bind uniquement sur 127.0.0.1, jamais exposé sur le réseau
 - Protection CSRF sur chaque POST (token aléatoire généré au lancement)
