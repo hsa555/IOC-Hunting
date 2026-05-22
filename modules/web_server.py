@@ -214,6 +214,23 @@ main{
 }
 .summary-bar.on{display:flex}
 
+/* ── nav ── */
+.nav-list{
+  display:none;flex-wrap:wrap;gap:6px;
+  padding:10px 14px;
+  background:var(--surface);border:1px solid var(--border);
+  border-radius:8px;
+}
+.nav-list.on{display:flex}
+.nav-chip{
+  background:var(--bg);border:1px solid var(--border2);
+  border-radius:20px;padding:3px 12px;
+  font-size:.72rem;color:var(--dim);cursor:pointer;
+  transition:border-color .15s,color .15s;user-select:none;
+  max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+.nav-chip:hover{border-color:var(--accent);color:var(--accent)}
+
 /* ── results list ── */
 #results-list{display:flex;flex-direction:column;gap:14px}
 
@@ -311,6 +328,8 @@ footer{
     <button class="dl-btn" id="dl-btn">↓ JSON</button>
   </div>
 
+  <div class="nav-list" id="nav-list"></div>
+
   <div id="results-list"></div>
 </main>
 
@@ -331,6 +350,7 @@ const fclr       = document.getElementById('fclr');
 const dlBtn      = document.getElementById('dl-btn');
 const summaryBar = document.getElementById('summary-bar');
 const summaryTxt = document.getElementById('summary-txt');
+const navList    = document.getElementById('nav-list');
 const resultsList= document.getElementById('results-list');
 const esc = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 
@@ -442,6 +462,8 @@ form.addEventListener('submit', async e => {
   startLoader();
   err.classList.remove('on');
   resultsList.innerHTML = '';
+  navList.innerHTML = '';
+  navList.classList.remove('on');
   summaryBar.classList.remove('on');
   lastRawData = null;
 
@@ -454,9 +476,12 @@ form.addEventListener('submit', async e => {
       err.classList.add('on');
     } else {
       // Crée une carte par cible
-      for (const block of (data.blocks || [])) {
-        const card = document.createElement('div');
+      const blocks = data.blocks || [];
+      blocks.forEach((block, i) => {
+        const cardId = `result-card-${i}`;
+        const card   = document.createElement('div');
         card.className = 'result';
+        card.id        = cardId;
         card.innerHTML =
           `<div class="result-hd">` +
             `<span class="tgt">${esc(block.target)}</span>` +
@@ -465,6 +490,22 @@ form.addEventListener('submit', async e => {
           `<div class="result-body"><pre></pre></div>`;
         card.querySelector('pre').innerHTML = block.html;
         resultsList.appendChild(card);
+      });
+
+      // Nav de navigation (affiché seulement pour plusieurs cibles)
+      if (blocks.length > 1) {
+        blocks.forEach((block, i) => {
+          const chip = document.createElement('span');
+          chip.className   = 'nav-chip';
+          chip.textContent = block.target;
+          chip.title       = block.target;
+          chip.onclick     = () => {
+            document.getElementById(`result-card-${i}`)
+              .scrollIntoView({behavior: 'smooth', block: 'start'});
+          };
+          navList.appendChild(chip);
+        });
+        navList.classList.add('on');
       }
 
       // Barre de résumé + bouton JSON
