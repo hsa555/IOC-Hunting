@@ -11,6 +11,7 @@ Requiert : pip install -r requirements.txt
 """
 
 import sys
+import re
 import json
 import getpass
 import urllib.request
@@ -26,6 +27,7 @@ from config_loader import (
     load_key, save_key_to_config, all_keys,
     is_encrypted, verify_passphrase, set_passphrase, get_passphrase,
     _load_all, _save_all, _encrypt,
+    load_setting, save_setting,
 )
 
 RESET  = "\033[0m";  BOLD  = "\033[1m";  DIM  = "\033[2m"
@@ -261,6 +263,68 @@ def _setup_any(svc):
     else:
         setup_service(svc)
 
+# ── cache ─────────────────────────────────────────────────────────────────────
+
+def _parse_duration(s: str) -> int | None:
+    """Convertit une durée humaine en secondes.
+    Unités supportées :
+      h          → heures        ex: 24h, 12h
+      j / d      → jours         ex: 2j, 7d
+      sem / w    → semaines      ex: 1sem, 2w
+      min / m    → minutes       ex: 30min
+    Sans unité   → heures        ex: 48 → 48h
+    """
+    s = s.strip().lower()
+    if not s:
+        return None
+    # sem/wk/min avant h/j/d/w/m pour éviter un match partiel
+    m = re.match(r'^(\d+(?:[.,]\d+)?)\s*(sem|min|h|j|d|w|m)?$', s)
+    if not m:
+        return None
+    val  = float(m.group(1).replace(',', '.'))
+    unit = m.group(2) or 'h'  # sans unité = heures
+    mult = {
+        'h': 3600,
+        'j': 86400, 'd': 86400,
+        'sem': 604800, 'w': 604800,
+        'min': 60, 'm': 60,
+    }
+    return int(val * mult[unit])
+
+def _fmt_duration(seconds: int) -> str:
+    """Affiche une durée lisible depuis un nombre de secondes."""
+    if seconds % 604800 == 0:
+        n = seconds // 604800
+        return f"{n} semaine{'s' if n > 1 else ''} ({n * 7}j)"
+    if seconds % 86400 == 0:
+        n = seconds // 86400
+        return f"{n} jour{'s' if n > 1 else ''} ({n * 24}h)"
+    if seconds % 3600 == 0:
+        return f"{seconds // 3600}h"
+    if seconds % 60 == 0:
+        return f"{seconds // 60}min"
+    return f"{seconds}s"
+
+def setup_cache():
+    """Configure la durée de rétention du cache des résultats."""
+    current = int(load_setting("cache_ttl") or 86400)
+    print()
+    sep()
+    print(f"  {c('Cache des résultats', BOLD, WHITE)}")
+    print(f"  {c('Durée actuelle :', DIM)} {c(_fmt_duration(current), WHITE)}")
+    print(f"  {c('Unités : h (heures)  j (jours)  sem (semaines)  ex: 48h  2j  1sem', DIM)}")
+    print()
+    raw = input(c("  Durée du cache  [Entrée = 24h] › ", CYAN)).strip()
+    if not raw:
+        ttl = 86400
+    else:
+        ttl = _parse_duration(raw)
+        if ttl is None or ttl < 60:
+            print(c("  Format non reconnu ou trop court (min : 1min). Valeur maintenue à 24h.", YELLOW))
+            ttl = 86400
+    save_setting("cache_ttl", ttl)
+    print(c(f"  Cache configuré : {_fmt_duration(ttl)}", GREEN, BOLD))
+
 # ── résumé ─────────────────────────────────────────────────────────────────────
 
 def print_banner():
@@ -319,6 +383,8 @@ def print_summary():
 def main():
     print_banner()
     setup_passphrase()
+
+    setup_cache()
 
     print()
     if input(c("  Configurer toutes les cles ? (O/n) › ", DIM)).strip().lower() == "n":

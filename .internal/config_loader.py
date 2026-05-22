@@ -11,8 +11,9 @@ import base64
 import getpass
 from pathlib import Path
 
-CONFIG_DIR  = Path.home() / ".config" / "threat_hunting"
-CONFIG_FILE = CONFIG_DIR / "keys.json"
+CONFIG_DIR     = Path.home() / ".config" / "threat_hunting"
+CONFIG_FILE    = CONFIG_DIR / "keys.json"
+SETTINGS_FILE  = CONFIG_DIR / "settings.json"  # paramètres non-sensibles (pas chiffrés)
 
 SERVICES = {
     "urlhaus":    {"label": "URLhaus (abuse.ch)",  "url": "https://auth.abuse.ch/"},
@@ -195,6 +196,24 @@ def save_key_to_config(service: str, key: str):
     data = _load_all()
     data[service] = key.strip()
     _save_all(data)
+
+def load_setting(key: str, default=None):
+    """Lit un paramètre non-sensible depuis settings.json (sans passphrase)."""
+    try:
+        data = json.loads(SETTINGS_FILE.read_text())
+        return data.get(key, default)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return default
+
+def save_setting(key: str, value):
+    """Sauvegarde un paramètre non-sensible dans settings.json (sans passphrase)."""
+    try:
+        data = json.loads(SETTINGS_FILE.read_text())
+    except (FileNotFoundError, json.JSONDecodeError):
+        data = {}
+    data[key] = value
+    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    SETTINGS_FILE.write_text(json.dumps(data, indent=2))
 
 def all_keys() -> dict:
     stored = _load_all()

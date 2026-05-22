@@ -62,7 +62,7 @@ except ImportError:
 _internal_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".internal")
 if _internal_path not in sys.path:
     sys.path.insert(0, _internal_path)
-from config_loader import load_key, all_keys, SERVICES
+from config_loader import load_key, all_keys, SERVICES, load_setting
 
 _modules_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "modules")
 if _modules_path not in sys.path:
@@ -122,7 +122,8 @@ def ts_to_year(ts) -> int | None:
 # Désactivable via --nocache pour forcer des requêtes API fraîches
 
 _CACHE_FILE = os.path.expanduser("~/.config/threat_hunting/cache.json")
-_CACHE_MAX  = 500  # nombre max d'entrées avant avertissement
+_CACHE_MAX  = 500   # nombre max d'entrées avant avertissement
+_CACHE_TTL  = 86400 # durée par défaut (24h) — remplacée au lancement par la config
 
 def _cache_load() -> dict:
     # Retourne {} si le fichier n'existe pas encore ou est corrompu
@@ -133,14 +134,17 @@ def _cache_load() -> dict:
         return {}
 
 def _cache_save(cache: dict):
-    # separators=(",", ":") pour un JSON compact sans espaces inutiles
+    # Écriture atomique : écrit dans .tmp puis os.replace() — jamais de fichier corrompu
+    # même si Ctrl+C intervient pendant la sauvegarde
     os.makedirs(os.path.dirname(_CACHE_FILE), exist_ok=True)
-    with open(_CACHE_FILE, "w") as fh:
+    tmp = _CACHE_FILE + ".tmp"
+    with open(tmp, "w") as fh:
         json.dump(cache, fh, separators=(",", ":"))
+    os.replace(tmp, _CACHE_FILE)
 
 def _cache_purge(cache: dict) -> int:
-    # Supprime toutes les entrées dont le timestamp est > 24h
-    cutoff  = time.time() - 86400
+    # Supprime toutes les entrées dont le timestamp dépasse _CACHE_TTL secondes
+    cutoff  = time.time() - _CACHE_TTL
     expired = [k for k, v in cache.items() if v.get("ts", 0) < cutoff]
     for k in expired:
         del cache[k]
@@ -152,9 +156,9 @@ def _cache_key(target: str, years) -> str:
     return f"{target}|{','.join(str(y) for y in sorted(years))}" if years else target
 
 def _cache_get(cache: dict, key: str) -> dict | None:
-    # Retourne None si entrée absente ou expirée (vérifie 24h glissantes)
+    # Retourne None si entrée absente ou expirée (vérifie _CACHE_TTL glissant)
     entry = cache.get(key)
-    if entry and time.time() - entry.get("ts", 0) <= 86400:
+    if entry and time.time() - entry.get("ts", 0) <= _CACHE_TTL:
         return entry.get("data")
     return None
 
@@ -1451,7 +1455,11 @@ def main():
 
     keys = all_keys()
 
-    # Charge le cache et purge les entrées expirées (> 24h)
+    # Charge le TTL depuis settings.json (sans passphrase) — fallback 24h si absent
+    global _CACHE_TTL
+    _CACHE_TTL = int(load_setting("cache_ttl") or 86400)
+
+    # Charge le cache et purge les entrées expirées selon _CACHE_TTL
     # --nocache désactive complètement le cache pour cette session
     cache = None
     if not args.nocache:

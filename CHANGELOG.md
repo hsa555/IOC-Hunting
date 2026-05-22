@@ -1,5 +1,6 @@
 ## 2026-05-22
-- Cache des résultats 24h glissantes (`~/.config/threat_hunting/cache.json`) — évite de reconsommer du quota API sur les cibles récentes
+- Cache des résultats avec durée configurable via `setup.py` (défaut 24h) — supporte `h`, `j`, `sem` (ex: `48h`, `2j`, `1sem`)
+- Écriture atomique du cache (`.tmp` + `os.replace`) — plus de corruption sur Ctrl+C
 - Purge automatique au lancement des entrées expirées (> 24h)
 - Avertissement + prompt de vidage si le cache dépasse 500 entrées
 - Option `--nocache` pour forcer des requêtes API fraîches
