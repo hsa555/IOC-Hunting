@@ -279,14 +279,14 @@ main{
 .scroll-top{
   position:fixed;bottom:24px;left:24px;
   width:36px;height:36px;border-radius:50%;
-  background:var(--surface);border:1px solid var(--border2);
-  color:var(--dim);font-size:1rem;line-height:36px;text-align:center;
+  background:#1f3a5f;border:1px solid var(--accent);
+  color:var(--accent);font-size:1rem;line-height:36px;text-align:center;
   cursor:pointer;opacity:0;pointer-events:none;
-  transition:opacity .25s,border-color .15s,color .15s;
-  user-select:none;z-index:99;
+  transition:opacity .25s,background .15s,color .15s;
+  user-select:none;z-index:99;box-shadow:0 0 8px #58a6ff33;
 }
 .scroll-top.visible{opacity:1;pointer-events:auto}
-.scroll-top:hover{border-color:var(--accent);color:var(--accent)}
+.scroll-top:hover{background:var(--accent);color:#fff;box-shadow:0 0 12px #58a6ff66}
 
 /* ── footer ── */
 footer{
