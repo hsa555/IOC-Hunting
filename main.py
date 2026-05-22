@@ -451,12 +451,15 @@ def _render_mini_virustotal(data):
     if not data or data.get("_skipped"): return
     if data.get("_error"):
         print(f"  {c('⚠', YELLOW)}  VirusTotal : {c(data['_error'], DIM)}"); return
-    stats = data.get("data", {}).get("attributes", {}).get("last_analysis_stats", {})
+    attr  = data.get("data", {}).get("attributes", {})
+    stats = attr.get("last_analysis_stats", {})
     mal   = stats.get("malicious", 0)
     sus   = stats.get("suspicious", 0)
     total = sum(stats.values())
     col   = RED + BOLD if mal > 0 else (YELLOW if sus > 0 else GREEN)
-    print(f"  {c('VirusTotal', BOLD):<28}  {c(f'{mal}', col)}/{total} moteurs  |  {sus} suspects")
+    tags  = attr.get("tags") or []
+    tags_s = f"  |  {c('Tags', BOLD)} : {c(', '.join(tags), CYAN)}" if tags else ""
+    print(f"  {c('VirusTotal', BOLD):<28}  {c(f'{mal}', col)}/{total} moteurs  |  {sus} suspects{tags_s}")
 
 def _render_mini_shodan(data):
     if not data or data.get("_skipped"): return
@@ -518,7 +521,9 @@ def _render_mini_vt_hash(data: dict):
     col   = RED + BOLD if mal > 0 else (YELLOW if sus > 0 else GREEN)
     names = (attr.get("names") or [])[:1]
     name_s = f"  |  {names[0][:40]}" if names else ""
-    print(f"  {c('VirusTotal', BOLD):<28}  {c(f'{mal}', col)}/{total} moteurs  |  {sus} suspects{name_s}")
+    tags   = attr.get("tags") or []
+    tags_s = f"  |  {c('Tags', BOLD)} : {c(', '.join(tags), CYAN)}" if tags else ""
+    print(f"  {c('VirusTotal', BOLD):<28}  {c(f'{mal}', col)}/{total} moteurs  |  {sus} suspects{name_s}{tags_s}")
 
 def _render_mini_urlhaus_hash(data: dict):
     if not data or data.get("_skipped"): return

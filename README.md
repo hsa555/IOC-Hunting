@@ -248,7 +248,7 @@ ThreatHunting/
   Détails par source
 
   AbuseIPDB                  score 100%  |  121 rapports  |  APNIC (UA)
-  VirusTotal                 8/91 moteurs  |  1 suspects
+  VirusTotal                 8/91 moteurs  |  1 suspects  |  Tags : scanner, vpn
   Shodan                     3 ports  |  0 CVE(s)
   Censys                     6 ports
   URLhaus                    is_host  |  online: 2  |  botnet_cc
