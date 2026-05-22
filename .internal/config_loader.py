@@ -146,8 +146,8 @@ def _load_all() -> dict:
         for attempt in range(3):
             pp = get_passphrase("  Passphrase de dechiffrement › ")
             if not pp:
-                print("  Aucune passphrase fournie.", file=sys.stderr)
-                return {}
+                print("  Passphrase requise — arrêt.", file=sys.stderr)
+                sys.exit(1)
             try:
                 result = _decrypt(raw, pp)
                 set_passphrase(pp)  # met en cache après succès
