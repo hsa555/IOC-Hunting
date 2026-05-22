@@ -278,9 +278,9 @@ main{
 /* ── scroll-to-top ── */
 .scroll-top{
   position:fixed;bottom:24px;left:24px;
-  width:36px;height:36px;border-radius:50%;
+  width:48px;height:48px;border-radius:50%;
   background:#1f3a5f;border:1px solid var(--accent);
-  color:var(--accent);font-size:1rem;line-height:36px;text-align:center;
+  color:var(--accent);font-size:1.2rem;line-height:48px;text-align:center;
   cursor:pointer;opacity:0;pointer-events:none;
   transition:opacity .25s,background .15s,color .15s;
   user-select:none;z-index:99;box-shadow:0 0 8px #58a6ff33;
