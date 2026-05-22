@@ -413,7 +413,7 @@ const navList    = document.getElementById('nav-list');
 const resultsList= document.getElementById('results-list');
 const scrollTop  = document.getElementById('scroll-top');
 const sideNav    = document.getElementById('side-nav');
-let cardObserver = null;
+let navScrollFn = null;
 const esc = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 
 // ── scroll-to-top ──
@@ -439,21 +439,23 @@ function buildSideNav(blocks) {
   });
   sideNav.classList.add('on');
 
-  // Surligne l'item correspondant à la carte visible
-  if (cardObserver) cardObserver.disconnect();
-  cardObserver = new IntersectionObserver(entries => {
-    entries.forEach(e => {
-      if (!e.isIntersecting) return;
-      const idx = parseInt(e.target.id.split('-').pop());
-      sideNav.querySelectorAll('.sn-item').forEach((el, i) =>
-        el.classList.toggle('active', i === idx));
-    });
-  }, {threshold: 0.3});
+  // Surligne la carte la plus haute encore visible dans le tiers supérieur
+  // (scroll listener plus fiable qu'IntersectionObserver pour ce cas)
+  function updateActive() {
+    const ref = window.innerHeight / 3;
+    let activeIdx = 0;
+    for (let i = 0; i < blocks.length; i++) {
+      const card = document.getElementById(`result-card-${i}`);
+      if (card && card.getBoundingClientRect().top <= ref) activeIdx = i;
+    }
+    sideNav.querySelectorAll('.sn-item').forEach((el, i) =>
+      el.classList.toggle('active', i === activeIdx));
+  }
 
-  blocks.forEach((_, i) => {
-    const card = document.getElementById(`result-card-${i}`);
-    if (card) cardObserver.observe(card);
-  });
+  if (navScrollFn) window.removeEventListener('scroll', navScrollFn);
+  navScrollFn = updateActive;
+  window.addEventListener('scroll', navScrollFn, {passive: true});
+  updateActive();
 }
 
 let lastRawData = null;
@@ -569,7 +571,7 @@ form.addEventListener('submit', async e => {
   summaryBar.classList.remove('on');
   sideNav.innerHTML = '';
   sideNav.classList.remove('on');
-  if (cardObserver) { cardObserver.disconnect(); cardObserver = null; }
+  if (navScrollFn) { window.removeEventListener('scroll', navScrollFn); navScrollFn = null; }
   lastRawData = null;
 
   try {
