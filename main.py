@@ -1295,6 +1295,11 @@ def _ask_ip_targets_interactive():
             line = input(c("  › ", DIM)).strip()
             if not line:
                 break
+            if ' ' in line:
+                parts = line.split()
+                if all(is_ip(p) or is_url(p) or is_hash(p) for p in parts):
+                    print(c(f"  Une seule cible par ligne — entre chaque IP / URL séparément.", YELLOW))
+                    continue
             targets.append(line)
         return targets
 
@@ -1357,6 +1362,36 @@ def _ask_hash_targets_interactive():
                 continue
             targets.append(line)
         return targets
+
+def _launch_web(keys: dict, cache):
+    """Lance le serveur Flask local. Appelé depuis --web et depuis le menu interactif."""
+    from modules.web_server import create_app, is_port_available
+    default_port = int(load_setting("web_port") or 5000)
+    while True:
+        try:
+            raw = input(c(f"  Port  ({default_port} par défaut) › ", CYAN)).strip()
+        except EOFError:
+            raw = ""
+        port = int(raw) if raw.isdigit() else default_port
+        if not (1024 <= port <= 65535):
+            print(c("  Port invalide — choisis entre 1024 et 65535.", RED))
+            continue
+        if not is_port_available(port):
+            print(c(f"  Port {port} déjà utilisé, choisis-en un autre.", RED))
+            continue
+        break
+    app = create_app(keys, cache, {
+        'correlation': run_correlation,
+        'hash':        run_hash_correlation,
+        'is_hash':     is_hash,
+        'parse_years': parse_years,
+    }, port)
+    print(c(f"\n  Interface web disponible sur ", DIM) + c(f"http://127.0.0.1:{port}", CYAN, BOLD))
+    print(c("  Ctrl+C pour arrêter.\n", DIM))
+    import logging
+    logging.getLogger('werkzeug').setLevel(logging.ERROR)
+    app.run(host='127.0.0.1', port=port, debug=False)
+
 
 def _run_ip_interactive(keys: dict, years, cache=None):
     """Session interactive IP/URL : appelle _ask_ip_targets_interactive(),
@@ -1484,34 +1519,7 @@ def main():
 
     # ── Mode web ─────────────────────────────────────────────────────────────
     if args.web:
-        from modules.web_server import create_app, is_port_available
-        default_port = int(load_setting("web_port") or 5000)
-        while True:
-            try:
-                raw = input(c(f"  Port  ({default_port} par défaut) › ", CYAN)).strip()
-            except EOFError:
-                raw = ""
-            port = int(raw) if raw.isdigit() else default_port
-            if not (1024 <= port <= 65535):
-                print(c("  Port invalide — choisis entre 1024 et 65535.", RED))
-                continue
-            if not is_port_available(port):
-                print(c(f"  Port {port} déjà utilisé, choisis-en un autre.", RED))
-                continue
-            break
-        app = create_app(keys, cache, {
-            'correlation': run_correlation,
-            'hash':        run_hash_correlation,
-            'is_hash':     is_hash,
-            'parse_years': parse_years,
-        }, port)
-        print(c(f"\n  Interface web disponible sur ", DIM) + c(f"http://127.0.0.1:{port}", CYAN, BOLD))
-        print(c("  Ctrl+C pour arrêter.\n", DIM))
-        # Supprime les logs Flask pour garder le terminal propre
-        import logging
-        log = logging.getLogger('werkzeug')
-        log.setLevel(logging.ERROR)
-        app.run(host='127.0.0.1', port=port, debug=False)
+        _launch_web(keys, cache)
         return
 
     # ── Mode hash (--type hash ou auto-détection) ────────────────────────────
@@ -1595,6 +1603,8 @@ def main():
               f"{c('(AbuseIPDB · VT · Shodan · Censys · URLhaus)', DIM)}")
         print(f"  {c('2', BOLD)}  Analyser un hash         "
               f"{c('(VirusTotal · URLhaus)', DIM)}")
+        print(f"  {c('w', BOLD)}  Interface web            "
+              f"{c('(navigateur · 127.0.0.1)', DIM)}")
         print(f"  {c('q', BOLD)}  Quitter")
         print()
 
@@ -1613,8 +1623,11 @@ def main():
         elif choix == "2":
             _run_hash_interactive(keys, cache)
             _print_main_menu()
+        elif choix == "w":
+            _launch_web(keys, cache)
+            _print_main_menu()
         else:
-            print(c("  Choix invalide (1, 2 ou q).", DIM))
+            print(c("  Choix invalide (1, 2, w ou q).", DIM))
 
 if __name__ == "__main__":
     # Handler global Ctrl+C : toutes les fonctions internes attrapent seulement EOFError,
