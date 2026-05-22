@@ -133,6 +133,7 @@ python3 main.py --web
 - **Multi-cibles** : textarea multi-lignes (une cible par ligne) ou chargement d'un fichier `.txt`
 - Une carte de résultat par cible, avec nav cliquable pour scroller directement à une carte
 - Bouton `↓ JSON` pour télécharger tous les résultats au format JSON
+- Bouton scroll-to-top fixe en bas à gauche (apparaît après 300px de scroll)
 - Historique des 10 dernières analyses dans `localStorage`
 - Options "Ignorer le cache" et filtre année disponibles
 - Validation : erreur si plusieurs cibles sur une même ligne (séparées par espace)

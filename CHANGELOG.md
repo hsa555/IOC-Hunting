@@ -1,3 +1,7 @@
+## 2026-05-22 (fixes)
+- Passphrase vide (Entrée sans saisir) → arrêt immédiat du script au lieu de continuer sans clés
+- Bouton scroll-to-top : fond bleu + bordure accent + halo, taille 48px — plus visible sur fond sombre
+
 ## 2026-05-22 (web — améliorations UI)
 - Interface web : textarea multi-lignes — plusieurs cibles saisies une par ligne
 - Upload `.txt` : bouton "Charger .txt", une cible par ligne, `#` = commentaire
