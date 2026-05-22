@@ -1440,6 +1440,8 @@ def main():
                         help="Mode d'analyse : ip (multi-sources) ou hash (VT + URLhaus)")
     parser.add_argument("--nocache", action="store_true",
                         help="Ignore le cache et force les requêtes API")
+    parser.add_argument("--web", "-w", action="store_true",
+                        help="Lance l'interface web locale (127.0.0.1)")
     args = parser.parse_args()
 
     years = parse_years(args.year) if args.year else None
@@ -1479,6 +1481,38 @@ def main():
                 cache.clear()
                 _cache_save(cache)
                 print(c("  Cache vidé.", GREEN))
+
+    # ── Mode web ─────────────────────────────────────────────────────────────
+    if args.web:
+        from modules.web_server import create_app, is_port_available
+        default_port = int(load_setting("web_port") or 5000)
+        while True:
+            try:
+                raw = input(c(f"  Port  ({default_port} par défaut) › ", CYAN)).strip()
+            except EOFError:
+                raw = ""
+            port = int(raw) if raw.isdigit() else default_port
+            if not (1024 <= port <= 65535):
+                print(c("  Port invalide — choisis entre 1024 et 65535.", RED))
+                continue
+            if not is_port_available(port):
+                print(c(f"  Port {port} déjà utilisé, choisis-en un autre.", RED))
+                continue
+            break
+        app = create_app(keys, cache, {
+            'correlation': run_correlation,
+            'hash':        run_hash_correlation,
+            'is_hash':     is_hash,
+            'parse_years': parse_years,
+        }, port)
+        print(c(f"\n  Interface web disponible sur ", DIM) + c(f"http://127.0.0.1:{port}", CYAN, BOLD))
+        print(c("  Ctrl+C pour arrêter.\n", DIM))
+        # Supprime les logs Flask pour garder le terminal propre
+        import logging
+        log = logging.getLogger('werkzeug')
+        log.setLevel(logging.ERROR)
+        app.run(host='127.0.0.1', port=port, debug=False)
+        return
 
     # ── Mode hash (--type hash ou auto-détection) ────────────────────────────
     force_hash = args.type == "hash"

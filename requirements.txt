@@ -8,3 +8,6 @@
 
 # Chiffrement des clés API : Fernet (AES-128-CBC + HMAC-SHA256) + PBKDF2-HMAC-SHA256
 cryptography>=41.0.0
+
+# Interface web locale (optionnelle — nécessaire uniquement pour --web)
+flask>=2.0.0

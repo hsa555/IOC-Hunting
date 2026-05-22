@@ -1,3 +1,12 @@
+## 2026-05-22 (web)
+- Interface web locale `--web` : bind uniquement sur 127.0.0.1, jamais exposé sur le réseau
+- Protection CSRF sur chaque POST (token aléatoire généré au lancement)
+- Détection de conflit de port au lancement, port configurable via `setup.py`
+- Sortie terminal (ANSI) convertie en HTML coloré dans l'interface
+- Historique des 10 dernières analyses persisté dans `localStorage`
+- Suppression des logs Werkzeug pour garder le terminal propre
+- Flask ajouté dans `requirements.txt` (optionnel, uniquement pour `--web`)
+
 ## 2026-05-22
 - `setup.py` affiche un menu (passphrase / clés API / cache / tout) quand la config existe déjà, au lieu de repasser sur chaque étape
 - Cache des résultats avec durée configurable via `setup.py` (24h par défaut, Entrée pour valider) — supporte `h`, `j`, `sem` (ex: `48h`, `2j`, `1sem`)

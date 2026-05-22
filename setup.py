@@ -423,6 +423,23 @@ def _run_keys_menu():
         except (ValueError, IndexError):
             print(c("  Choix invalide.", DIM))
 
+def setup_web_port():
+    """Configure le port par défaut de l'interface web."""
+    current = int(load_setting("web_port") or 5000)
+    print()
+    sep()
+    print(f"  {c('Port interface web', BOLD, WHITE)}")
+    print(f"  {c(f'Port actuel : {current}', DIM)}")
+    print()
+    raw = input(c(f"  Port  (Entrée = garder {current}) › ", CYAN)).strip()
+    if not raw:
+        return
+    if raw.isdigit() and 1024 <= int(raw) <= 65535:
+        save_setting("web_port", int(raw))
+        print(c(f"  Port configuré : {raw}", GREEN, BOLD))
+    else:
+        print(c("  Port invalide — inchangé (doit être entre 1024 et 65535).", YELLOW))
+
 def _run_change_menu():
     """Menu affiché quand une config existe déjà."""
     while True:
@@ -432,7 +449,8 @@ def _run_change_menu():
         print(f"  {c('1', BOLD)}  Passphrase")
         print(f"  {c('2', BOLD)}  Clés API")
         print(f"  {c('3', BOLD)}  Durée du cache")
-        print(f"  {c('4', BOLD)}  Tout reconfigurer")
+        print(f"  {c('4', BOLD)}  Port interface web")
+        print(f"  {c('5', BOLD)}  Tout reconfigurer")
         print(f"  {c('q', BOLD)}  Quitter")
         print()
         try:
@@ -449,8 +467,11 @@ def _run_change_menu():
         elif choix == "3":
             setup_cache()
         elif choix == "4":
+            setup_web_port()
+        elif choix == "5":
             setup_passphrase()
             setup_cache()
+            setup_web_port()
             for svc in SERVICES:
                 _setup_any(svc)
             break

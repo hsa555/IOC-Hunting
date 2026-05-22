@@ -40,6 +40,7 @@ Outil de threat hunting en ligne de commande qui corrèle automatiquement plusie
 - **Hachage local de fichiers** : calcule le SHA256 de fichiers/répertoires locaux, puis les interroge
 - **Scan de répertoire** : si un répertoire est fourni à la place d'un fichier, tous les fichiers sont traités
 - **Cache des résultats** : évite de reconsommer du quota API — durée configurable via `setup.py` (24h par défaut), purgé automatiquement au lancement. Option `--nocache` pour forcer des requêtes fraîches
+- **Interface web locale** (`--web`) : UI dark-theme dans le navigateur, bind uniquement sur 127.0.0.1, protection CSRF
 - **Chiffrement des clés API** : Fernet/AES-128-CBC + PBKDF2-HMAC-SHA256 (480 000 itérations)
 - **Export JSON** du rapport complet
 - **Ctrl+C propre** : message d'arrêt au lieu d'une traceback
@@ -111,7 +112,28 @@ python3 main.py 1.2.3.4 --json
 
 # Forcer les requêtes API (ignore le cache)
 python3 main.py 1.2.3.4 --nocache
+
+# Lancer l'interface web locale
+python3 main.py --web
 ```
+
+### Interface web locale (`--web`)
+
+Lance un serveur Flask **uniquement accessible depuis la machine locale** (127.0.0.1). Ouvre ensuite `http://127.0.0.1:<port>` dans le navigateur.
+
+```bash
+python3 main.py --web
+# → Propose le port (5000 par défaut, configurable via setup.py)
+# → Démarre le serveur et affiche l'URL
+```
+
+- Bind sur 127.0.0.1 uniquement — jamais exposé sur le réseau
+- Protection CSRF sur chaque soumission
+- Résultats colorés (ANSI → HTML), identiques au terminal
+- Historique des 10 dernières analyses dans `localStorage`
+- Option "Ignorer le cache" et filtre année disponibles
+
+> **Note** : nécessite Flask (`pip install flask` ou `pip install -r requirements.txt`). Ne jamais lancer en root sur un serveur partagé.
 
 ### Hachage de fichiers locaux (mode hash)
 
