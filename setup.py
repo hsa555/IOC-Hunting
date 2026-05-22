@@ -378,27 +378,106 @@ def print_summary():
     sep("═")
     print()
 
+# ── menu modification ─────────────────────────────────────────────────────────
+
+def _unlock():
+    """Déverrouille la passphrase en mémoire sans proposer de changement."""
+    if not is_encrypted():
+        return
+    for attempt in range(3):
+        pp = get_passphrase(c("  Passphrase › ", CYAN))
+        if pp is None:
+            print(); sys.exit(0)
+        if verify_passphrase(pp):
+            set_passphrase(pp)
+            print(c("  Déverrouillé.", GREEN))
+            return
+        print(c("  Passphrase incorrecte.", RED))
+        if attempt == 2:
+            print(c("  Trop de tentatives.", RED)); sys.exit(1)
+
+def _change_passphrase():
+    """Propose de changer la passphrase (passphrase actuelle déjà en cache mémoire)."""
+    new_pp = _prompt_new_passphrase()
+    existing = _load_all()
+    set_passphrase(new_pp)
+    _save_all(existing)
+    print(c("  Passphrase mise à jour.", GREEN, BOLD))
+
+def _run_keys_menu():
+    """Sous-menu : choisir quelle(s) clé(s) API modifier."""
+    svcs = list(SERVICES.keys())
+    print()
+    print(f"  {c('1', BOLD)}  Toutes les clés")
+    for i, svc in enumerate(svcs, 2):
+        print(f"  {c(str(i), BOLD)}  {SERVICES[svc]['label']}")
+    print()
+    choix = input(c("  Choix › ", CYAN)).strip()
+    if choix == "1":
+        for svc in svcs:
+            _setup_any(svc)
+    else:
+        try:
+            svc = svcs[int(choix) - 2]
+            _setup_any(svc)
+        except (ValueError, IndexError):
+            print(c("  Choix invalide.", DIM))
+
+def _run_change_menu():
+    """Menu affiché quand une config existe déjà."""
+    while True:
+        print()
+        sep()
+        print(f"  {c('Que veux-tu modifier ?', BOLD, WHITE)}\n")
+        print(f"  {c('1', BOLD)}  Passphrase")
+        print(f"  {c('2', BOLD)}  Clés API")
+        print(f"  {c('3', BOLD)}  Durée du cache")
+        print(f"  {c('4', BOLD)}  Tout reconfigurer")
+        print(f"  {c('q', BOLD)}  Quitter")
+        print()
+        try:
+            choix = input(c("  Choix › ", CYAN)).strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            print(); break
+
+        if choix == "q":
+            break
+        elif choix == "1":
+            _change_passphrase()
+        elif choix == "2":
+            _run_keys_menu()
+        elif choix == "3":
+            setup_cache()
+        elif choix == "4":
+            setup_passphrase()
+            setup_cache()
+            for svc in SERVICES:
+                _setup_any(svc)
+            break
+        else:
+            print(c("  Choix invalide.", DIM))
+
 # ── main ──────────────────────────────────────────────────────────────────────
 
 def main():
     print_banner()
-    setup_passphrase()
 
-    setup_cache()
-
-    print()
-    if input(c("  Configurer toutes les cles ? (O/n) › ", DIM)).strip().lower() == "n":
-        print()
-        print(f"  Services : {', '.join(SERVICES.keys())}")
-        svc = input(c("  Quel service configurer ? › ", CYAN)).strip().lower()
-        if svc not in SERVICES:
-            print(c(f"  Service inconnu : {svc}", RED)); sys.exit(1)
-        _setup_any(svc)
+    if CONFIG_FILE.exists():
+        # Config existante → déverrouille puis affiche le menu de modification
+        _unlock()
+        _run_change_menu()
     else:
+        # Première configuration → flow séquentiel complet
+        setup_passphrase()
+        setup_cache()
         for svc in SERVICES:
             _setup_any(svc)
 
     print_summary()
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        print(f"\n\n  {c('Ctrl+C — Au revoir.', YELLOW)}\n")
+        sys.exit(0)

@@ -1,4 +1,5 @@
 ## 2026-05-22
+- `setup.py` affiche un menu (passphrase / clés API / cache / tout) quand la config existe déjà, au lieu de repasser sur chaque étape
 - Cache des résultats avec durée configurable via `setup.py` (24h par défaut, Entrée pour valider) — supporte `h`, `j`, `sem` (ex: `48h`, `2j`, `1sem`)
 - Écriture atomique du cache (`.tmp` + `os.replace`) — plus de corruption sur Ctrl+C
 - Purge automatique au lancement des entrées expirées (> 24h)
