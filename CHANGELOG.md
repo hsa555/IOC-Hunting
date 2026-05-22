@@ -1,4 +1,8 @@
 ## 2026-05-22
+- Cache des résultats 24h glissantes (`~/.config/threat_hunting/cache.json`) — évite de reconsommer du quota API sur les cibles récentes
+- Purge automatique au lancement des entrées expirées (> 24h)
+- Avertissement + prompt de vidage si le cache dépasse 500 entrées
+- Option `--nocache` pour forcer des requêtes API fraîches
 - Tab completion sur les inputs de chemin (fichier / répertoire / export)
 - Tags VirusTotal affichés inline sur la ligne de résumé (`| Tags : scanner, vpn`)
 

@@ -115,6 +115,53 @@ def ts_to_year(ts) -> int | None:
     except Exception:
         return None
 
+# ── cache ──────────────────────────────────────────────────────────────────────
+# Stocke les résultats d'analyse dans ~/.config/threat_hunting/cache.json
+# Format : { "cible|years": {"ts": float, "data": {...}} }
+# Expiration : 24h glissantes (pas par jour calendaire, pour éviter les coupures à minuit)
+# Désactivable via --nocache pour forcer des requêtes API fraîches
+
+_CACHE_FILE = os.path.expanduser("~/.config/threat_hunting/cache.json")
+_CACHE_MAX  = 500  # nombre max d'entrées avant avertissement
+
+def _cache_load() -> dict:
+    # Retourne {} si le fichier n'existe pas encore ou est corrompu
+    try:
+        with open(_CACHE_FILE) as fh:
+            return json.load(fh)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+
+def _cache_save(cache: dict):
+    # separators=(",", ":") pour un JSON compact sans espaces inutiles
+    os.makedirs(os.path.dirname(_CACHE_FILE), exist_ok=True)
+    with open(_CACHE_FILE, "w") as fh:
+        json.dump(cache, fh, separators=(",", ":"))
+
+def _cache_purge(cache: dict) -> int:
+    # Supprime toutes les entrées dont le timestamp est > 24h
+    cutoff  = time.time() - 86400
+    expired = [k for k, v in cache.items() if v.get("ts", 0) < cutoff]
+    for k in expired:
+        del cache[k]
+    return len(expired)
+
+def _cache_key(target: str, years) -> str:
+    # Inclut le filtre years dans la clé pour éviter les collisions entre requêtes
+    # ex: "1.2.3.4|2024,2025" et "1.2.3.4" sont deux entrées distinctes
+    return f"{target}|{','.join(str(y) for y in sorted(years))}" if years else target
+
+def _cache_get(cache: dict, key: str) -> dict | None:
+    # Retourne None si entrée absente ou expirée (vérifie 24h glissantes)
+    entry = cache.get(key)
+    if entry and time.time() - entry.get("ts", 0) <= 86400:
+        return entry.get("data")
+    return None
+
+def _cache_set(cache: dict, key: str, data: dict):
+    # Enregistre le résultat avec le timestamp courant
+    cache[key] = {"ts": time.time(), "data": data}
+
 # ── wrappers HTTP de base ──────────────────────────────────────────────────────
 
 def _urlhaus_post(endpoint, payload, key):
@@ -440,9 +487,10 @@ def score_from_hash_results(results: dict) -> tuple:
 #     _render_mini_*()   → une ligne par source dans le tableau résumé
 #     render_censys_services() / render_urlhaus_hashes() / render_vt_*() → sections détail
 
-def render_summary(target, results, score, signals):
+def render_summary(target, results, score, signals, cached=False):
     sep("═")
-    print(f"\n  {c('ThreatHunting', BOLD, WHITE)}  {c('›', DIM)}  {c(target, CYAN, BOLD)}\n")
+    cache_s = c("  (cache)", DIM) if cached else ""
+    print(f"\n  {c('ThreatHunting', BOLD, WHITE)}  {c('›', DIM)}  {c(target, CYAN, BOLD)}{cache_s}\n")
     level_label, level_col = threat_level(score)
     bar = c("█" * int(score / 5), level_col) + c("░" * (20 - int(score / 5)), DIM)
     print(f"  {c('Score de menace', BOLD)}  {bar}  {c(f'{score}/100', level_col, BOLD)}  [{level_label}]")
@@ -890,12 +938,25 @@ def render_details(target, kind, results, years=None, as_json=False):
 
 # ── orchestration ──────────────────────────────────────────────────────────────
 
-def run_correlation(target, keys, as_json=False, years=None):
+def run_correlation(target, keys, as_json=False, years=None, cache=None):
     """Analyse principale pour une IP ou URL.
     Phase 1 : fetch en parallèle de toutes les sources applicables.
     Phase 1b : si URLhaus ne retourne pas de payloads inline, les récupère URL par URL.
     Phase 2 : fetch séquentiel des relations VT (communicating + referrer files) —
               séquentiel car le plan gratuit VT = 4 req/min ; on dort 16s entre chaque."""
+    if cache is not None:
+        hit = _cache_get(cache, _cache_key(target, years))
+        if hit:
+            kind = hit["type"]
+            results = hit["results"]
+            score, signals = score_from_results(results)
+            if not as_json:
+                render_summary(target, results, score, signals, cached=True)
+                render_details(target, kind, results, years=years)
+            else:
+                print(json.dumps({**hit, "cached": True}, indent=2))
+            return hit
+
     kind  = "url" if is_url(target) else ("hash" if is_hash(target) else "ip")
     tasks = {}
 
@@ -999,16 +1060,55 @@ def run_correlation(target, keys, as_json=False, years=None):
         render_summary(target, results, score, signals)
         render_details(target, kind, results, years=years, as_json=False)
 
-    return {"target": target, "type": kind, "score": score, "results": results}
+    result = {"target": target, "type": kind, "score": score, "results": results}
+
+    # Sauvegarde en cache si activé (clé inclut le filtre years pour éviter les collisions)
+    if cache is not None:
+        _cache_set(cache, _cache_key(target, years), result)
+        _cache_save(cache)
+
+    return result
 
 # ── hash correlation ───────────────────────────────────────────────────────────
 
-def run_hash_correlation(targets: list, keys: dict, as_json: bool = False, export_path: str = None) -> list:
+def run_hash_correlation(targets: list, keys: dict, as_json: bool = False, export_path: str = None, cache: dict = None) -> list:
     """Analyse une liste de hashes (MD5/SHA1/SHA256) via VT + URLhaus en parallèle.
     16s de pause entre chaque hash pour respecter le rate limit VT (4 req/min).
     Retourne la liste de tous les résultats ; exporte en JSON si export_path fourni."""
     all_results = []
     for i, h in enumerate(targets):
+        # Vérifie le cache avant toute requête API
+        if cache is not None:
+            hit = _cache_get(cache, h)
+            if hit:
+                score, signals = score_from_hash_results(hit["results"])
+                if not as_json:
+                    sep("═")
+                    print(f"\n  {c('ThreatHunting — Hash', BOLD, WHITE)}  {c('›', DIM)}  {c(h, CYAN, BOLD)}  {c('(cache)', DIM)}\n")
+                    level_label, level_col = threat_level(score)
+                    bar = c("█" * int(score / 5), level_col) + c("░" * (20 - int(score / 5)), DIM)
+                    print(f"  {c('Score de menace', BOLD)}  {bar}  {c(f'{score}/100', level_col, BOLD)}  [{level_label}]")
+                    print()
+                    if signals:
+                        print(f"  {c('Signaux détectés', BOLD)}")
+                        for s in signals:
+                            print(f"    {c('·', DIM)}  {s}")
+                    else:
+                        print(f"  {c('·  Aucun signal malveillant détecté', GREEN)}")
+                    print()
+                    sep()
+                    print(f"  {c('Détails par source', BOLD)}\n")
+                    _render_mini_vt_hash(hit["results"].get("virustotal"))
+                    _render_mini_urlhaus_hash(hit["results"].get("urlhaus"))
+                    print()
+                    render_urlhaus_hash_section(hit["results"].get("urlhaus", {}))
+                    render_vt_hash_section(hit["results"].get("virustotal", {}))
+                    sep("═")
+                else:
+                    print(json.dumps({**hit, "cached": True}, indent=2))
+                all_results.append(hit)
+                continue  # passe au hash suivant sans dormir
+
         if i > 0:
             time.sleep(16)  # VT free tier : 4 req/min
 
@@ -1072,7 +1172,14 @@ def run_hash_correlation(targets: list, keys: dict, as_json: bool = False, expor
         else:
             print(json.dumps({"target": h, "type": "hash", "score": score, "results": results}, indent=2))
 
-        all_results.append({"target": h, "type": "hash", "score": score, "results": results})
+        result = {"target": h, "type": "hash", "score": score, "results": results}
+
+        # Sauvegarde en cache si activé
+        if cache is not None:
+            _cache_set(cache, h, result)
+            _cache_save(cache)
+
+        all_results.append(result)
 
     if export_path:
         with open(export_path, "w") as fh:
@@ -1247,7 +1354,7 @@ def _ask_hash_targets_interactive():
             targets.append(line)
         return targets
 
-def _run_ip_interactive(keys: dict, years):
+def _run_ip_interactive(keys: dict, years, cache=None):
     """Session interactive IP/URL : appelle _ask_ip_targets_interactive(),
     puis run_correlation() pour chaque cible. Retourne sans action si "retour"."""
     print()
@@ -1269,14 +1376,14 @@ def _run_ip_interactive(keys: dict, years):
         print()
     all_results = []
     for target in targets:
-        r = run_correlation(target, keys, years=years)
+        r = run_correlation(target, keys, years=years, cache=cache)
         all_results.append(r)
     if export:
         with open(export, "w") as fh:
             json.dump(all_results, fh, indent=2)
         print(c(f"  Rapport exporté → {export}", GREEN))
 
-def _run_hash_interactive(keys: dict):
+def _run_hash_interactive(keys: dict, cache=None):
     """Boucle interactive hash : demande des cibles, lance run_hash_correlation(),
     puis propose d'analyser un autre hash ou de revenir au menu principal."""
     missing = [s for s, k in keys.items() if not k and s in ("virustotal", "urlhaus")]
@@ -1298,7 +1405,7 @@ def _run_hash_interactive(keys: dict):
                 continue
             break
         export = _input_path(c("  Fichier export JSON (vide = pas d'export) › ", DIM)) or None
-        run_hash_correlation(targets, keys, export_path=export)
+        run_hash_correlation(targets, keys, export_path=export, cache=cache)
 
         print()
         try:
@@ -1325,8 +1432,10 @@ def main():
     parser.add_argument("--json",          action="store_true", help="Sortie JSON brute")
     parser.add_argument("--export", "-e",  help="Exporter rapport JSON")
     parser.add_argument("--year",   "-y",  help="Filtrer VT files par année(s) ex: 2025  ou  2024,2025")
-    parser.add_argument("--type",   "-t",  choices=["ip", "hash"],
+    parser.add_argument("--type",    "-t",  choices=["ip", "hash"],
                         help="Mode d'analyse : ip (multi-sources) ou hash (VT + URLhaus)")
+    parser.add_argument("--nocache", action="store_true",
+                        help="Ignore le cache et force les requêtes API")
     args = parser.parse_args()
 
     years = parse_years(args.year) if args.year else None
@@ -1341,6 +1450,27 @@ def main():
             sys.exit(1)
 
     keys = all_keys()
+
+    # Charge le cache et purge les entrées expirées (> 24h)
+    # --nocache désactive complètement le cache pour cette session
+    cache = None
+    if not args.nocache:
+        cache = _cache_load()
+        n_expired = _cache_purge(cache)
+        if n_expired and not args.json:
+            print(c(f"  {n_expired} entrée(s) expirée(s) supprimée(s) du cache.", DIM))
+        # Avertissement si le cache dépasse _CACHE_MAX entrées (seuil : ~10 MB)
+        # En mode JSON/non-interactif on ne bloque pas, on continue silencieusement
+        if len(cache) > _CACHE_MAX and not args.json:
+            print(c(f"  Cache : {len(cache)} entrées (limite recommandée : {_CACHE_MAX}).", YELLOW))
+            try:
+                ans = input(c("  Vider le cache maintenant ? (o/N) › ", DIM)).strip().lower()
+            except EOFError:
+                ans = "n"
+            if ans == "o":
+                cache.clear()
+                _cache_save(cache)
+                print(c("  Cache vidé.", GREEN))
 
     # ── Mode hash (--type hash ou auto-détection) ────────────────────────────
     force_hash = args.type == "hash"
@@ -1362,7 +1492,7 @@ def main():
         if missing and not args.json:
             print(c(f"  Clés manquantes : {', '.join(missing)}", YELLOW))
             print(f"  Lance {c('python setup.py', CYAN)} pour les configurer.\n")
-        run_hash_correlation(targets, keys, as_json=args.json, export_path=args.export)
+        run_hash_correlation(targets, keys, as_json=args.json, export_path=args.export, cache=cache)
         return
 
     # ── Mode IP/URL avec cibles fournies ────────────────────────────────────
@@ -1389,7 +1519,7 @@ def main():
             print()
         all_results = []
         for target in targets:
-            r = run_correlation(target, keys, as_json=args.json, years=years)
+            r = run_correlation(target, keys, as_json=args.json, years=years, cache=cache)
             all_results.append(r)
         if args.export:
             with open(args.export, "w") as fh:
@@ -1404,7 +1534,7 @@ def main():
                     print(); break
                 if not nxt:
                     break
-                r = run_correlation(nxt, keys, as_json=False, years=years)
+                r = run_correlation(nxt, keys, as_json=False, years=years, cache=cache)
                 all_results.append(r)
                 if args.export:
                     with open(args.export, "w") as fh:
@@ -1436,10 +1566,10 @@ def main():
         if choix == "q":
             print(c("  Au revoir.\n", DIM)); sys.exit(0)
         elif choix == "1":
-            _run_ip_interactive(keys, years)
+            _run_ip_interactive(keys, years, cache)
             _print_main_menu()
         elif choix == "2":
-            _run_hash_interactive(keys)
+            _run_hash_interactive(keys, cache)
             _print_main_menu()
         else:
             print(c("  Choix invalide (1, 2 ou q).", DIM))

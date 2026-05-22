@@ -39,6 +39,7 @@ Outil de threat hunting en ligne de commande qui corrèle automatiquement plusie
 - **Ports ouverts et services** via Shodan (fallback InternetDB sans clé) et Censys
 - **Hachage local de fichiers** : calcule le SHA256 de fichiers/répertoires locaux, puis les interroge
 - **Scan de répertoire** : si un répertoire est fourni à la place d'un fichier, tous les fichiers sont traités
+- **Cache des résultats** : évite de reconsommer du quota API — résultats mis en cache 24h glissantes, purgés automatiquement au lancement. Option `--nocache` pour forcer des requêtes fraîches
 - **Chiffrement des clés API** : Fernet/AES-128-CBC + PBKDF2-HMAC-SHA256 (480 000 itérations)
 - **Export JSON** du rapport complet
 - **Ctrl+C propre** : message d'arrêt au lieu d'une traceback
@@ -107,6 +108,9 @@ python3 main.py 1.2.3.4 --export rapport.json
 
 # Sortie JSON brute (machine-readable)
 python3 main.py 1.2.3.4 --json
+
+# Forcer les requêtes API (ignore le cache)
+python3 main.py 1.2.3.4 --nocache
 ```
 
 ### Hachage de fichiers locaux (mode hash)
@@ -231,6 +235,11 @@ ThreatHunting/
 ---
 
 ## Exemple de sortie — mode IP
+
+Si la cible a déjà été analysée dans les dernières 24h, le résultat est chargé depuis le cache (sans appel API) :
+```
+  ThreatHunting  ›  1.2.3.4  (cache)
+```
 
 ```
 ════════════════════════════════════════════════════════════════════════
