@@ -1,14 +1,36 @@
-# Bytecode Python
+# ── Python ────────────────────────────────────────────────────────────────────
 __pycache__/
 *.pyc
 *.pyo
+*.pyd
+.Python
+*.egg-info/
 
-# Fichiers de sortie (données d'enquête potentiellement sensibles)
+# ── Données de config / cache (générées à l'exécution) ───────────────────────
 *.json
+!package.json        # au cas où
 
-# Fichiers texte de cibles — sauf requirements.txt
+# ── Variables d'environnement ─────────────────────────────────────────────────
+.env
+.env.*
+
+# ── Fichiers de cibles (données d'enquête potentiellement sensibles) ──────────
 *.txt
 !requirements.txt
 
-# Historique de session Claude
+# ── Éditeurs & IDE ────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# ── OS ────────────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+
+# ── Logs & exports ────────────────────────────────────────────────────────────
+*.log
+*.csv
+
+# ── Historique de session Claude ──────────────────────────────────────────────
 .claude/
