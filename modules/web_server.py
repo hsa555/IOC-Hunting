@@ -266,7 +266,7 @@ footer{
       <input type="file" id="ftxt" name="targets_file" accept=".txt" style="display:none">
       <div class="btn-col">
         <button type="submit" id="btn">Analyser →</button>
-        <button type="button" class="upload-btn" id="upload-btn" title="Charger un fichier .txt (une cible par ligne)">.txt</button>
+        <button type="button" class="upload-btn" id="upload-btn" title="Une cible par ligne">Charger .txt</button>
       </div>
     </div>
 

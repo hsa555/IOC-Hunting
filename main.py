@@ -1066,8 +1066,8 @@ def run_correlation(target, keys, as_json=False, years=None, cache=None):
 
     result = {"target": target, "type": kind, "score": score, "results": results}
 
-    # Sauvegarde en cache si activé (clé inclut le filtre years pour éviter les collisions)
-    if cache is not None:
+    # Sauvegarde en cache — ignoré si la cible contient un espace (entrée malformée)
+    if cache is not None and ' ' not in target:
         _cache_set(cache, _cache_key(target, years), result)
         _cache_save(cache)
 
@@ -1178,8 +1178,8 @@ def run_hash_correlation(targets: list, keys: dict, as_json: bool = False, expor
 
         result = {"target": h, "type": "hash", "score": score, "results": results}
 
-        # Sauvegarde en cache si activé
-        if cache is not None:
+        # Sauvegarde en cache — ignoré si le hash contient un espace (entrée malformée)
+        if cache is not None and ' ' not in h:
             _cache_set(cache, h, result)
             _cache_save(cache)
 
