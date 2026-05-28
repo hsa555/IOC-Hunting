@@ -11,31 +11,40 @@ import base64
 import getpass
 from pathlib import Path
 
-CONFIG_DIR     = Path.home() / ".config" / "threat_hunting"
-CONFIG_FILE    = CONFIG_DIR / "keys.json"
-SETTINGS_FILE  = CONFIG_DIR / "settings.json"  # paramètres non-sensibles (pas chiffrés)
+CONFIG_DIR    = Path.home() / ".config" / "threat_hunting"
+CONFIG_FILE   = CONFIG_DIR / "keys.json"
+SETTINGS_FILE = CONFIG_DIR / "settings.json"  # paramètres non-sensibles (pas chiffrés)
 
 SERVICES = {
-    "urlhaus":    {"label": "URLhaus (abuse.ch)",  "url": "https://auth.abuse.ch/"},
-    "abuseipdb":  {"label": "AbuseIPDB",           "url": "https://www.abuseipdb.com/account/api"},
-    "virustotal": {"label": "VirusTotal",           "url": "https://www.virustotal.com/gui/my-apikey"},
-    "shodan":     {"label": "Shodan",               "url": "https://account.shodan.io/"},
-    "censys":     {"label": "Censys",               "url": "https://search.censys.io/account/api"},
+    "urlhaus":    {"label": "URLhaus (abuse.ch)",  "url": "https://auth.abuse.ch/",                   "env": "URLHAUS_API_KEY"},
+    "abuseipdb":  {"label": "AbuseIPDB",           "url": "https://www.abuseipdb.com/account/api",    "env": "ABUSEIPDB_API_KEY"},
+    "virustotal": {"label": "VirusTotal",           "url": "https://www.virustotal.com/gui/my-apikey", "env": "VIRUSTOTAL_API_KEY"},
+    "shodan":     {"label": "Shodan",               "url": "https://account.shodan.io/",               "env": "SHODAN_API_KEY"},
+    "censys":     {"label": "Censys",               "url": "https://search.censys.io/account/api",     "env": "CENSYS_API_KEY"},
 }
 
-_ENV_VAR      = "THREAT_HUNTING_PASSPHRASE"
-_passphrase_cache: str | None = None
-_env_consumed: bool = False  # env var est consommée une seule fois, puis ignorée si fausse
-_data_cache: dict | None = None
+_ENV_VAR          = "THREAT_HUNTING_PASSPHRASE"
+_passphrase_cache: str | None  = None
+_env_consumed: bool            = False  # env var consommée une seule fois
+_data_cache: dict | None       = None
+_settings_cache: dict | None   = None
 
-# ── import crypto (erreur claire si manquant) ──────────────────────────────────
+# ── import crypto (lazy, une seule fois) ──────────────────────────────────────
 
-def _crypto():
+_Fernet       = None
+_InvalidToken = None
+_PBKDF2HMAC   = None
+_hashes       = None
+
+def _ensure_crypto():
+    global _Fernet, _InvalidToken, _PBKDF2HMAC, _hashes
+    if _Fernet is not None:
+        return
     try:
         from cryptography.fernet import Fernet, InvalidToken
         from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
         from cryptography.hazmat.primitives import hashes
-        return Fernet, InvalidToken, PBKDF2HMAC, hashes
+        _Fernet, _InvalidToken, _PBKDF2HMAC, _hashes = Fernet, InvalidToken, PBKDF2HMAC, hashes
     except ImportError:
         print(
             "\n  [!] Module 'cryptography' manquant.\n"
@@ -47,9 +56,9 @@ def _crypto():
 # ── dérivation de clé ─────────────────────────────────────────────────────────
 
 def _derive_fernet_key(passphrase: str, salt: bytes) -> bytes:
-    _, _, PBKDF2HMAC, hashes = _crypto()
-    kdf = PBKDF2HMAC(
-        algorithm=hashes.SHA256(),
+    _ensure_crypto()
+    kdf = _PBKDF2HMAC(
+        algorithm=_hashes.SHA256(),
         length=32,
         salt=salt,
         iterations=480_000,
@@ -59,10 +68,10 @@ def _derive_fernet_key(passphrase: str, salt: bytes) -> bytes:
 # ── chiffrement / déchiffrement ───────────────────────────────────────────────
 
 def _encrypt(data: dict, passphrase: str) -> dict:
-    Fernet, _, _, _ = _crypto()
+    _ensure_crypto()
     salt  = os.urandom(16)
     key   = _derive_fernet_key(passphrase, salt)
-    token = Fernet(key).encrypt(json.dumps(data).encode())
+    token = _Fernet(key).encrypt(json.dumps(data).encode())
     return {
         "v":    1,
         "salt": base64.b64encode(salt).decode(),
@@ -70,12 +79,12 @@ def _encrypt(data: dict, passphrase: str) -> dict:
     }
 
 def _decrypt(stored: dict, passphrase: str) -> dict:
-    Fernet, InvalidToken, _, _ = _crypto()
+    _ensure_crypto()
     salt = base64.b64decode(stored["salt"])
     key  = _derive_fernet_key(passphrase, salt)
     try:
-        plain = Fernet(key).decrypt(stored["data"].encode())
-    except InvalidToken:
+        plain = _Fernet(key).decrypt(stored["data"].encode())
+    except _InvalidToken:
         raise ValueError("Passphrase incorrecte — déchiffrement impossible.")
     return json.loads(plain)
 
@@ -118,7 +127,7 @@ def get_passphrase(prompt_msg: str = "  Passphrase › ") -> str | None:
         return _passphrase_cache
     if not _env_consumed:
         val = os.environ.get(_ENV_VAR, "").strip()
-        _env_consumed = True  # marque comme consommée, même si vide
+        _env_consumed = True
         if val:
             return val
     try:
@@ -131,7 +140,7 @@ def get_passphrase(prompt_msg: str = "  Passphrase › ") -> str | None:
 # ── lecture / écriture config ─────────────────────────────────────────────────
 
 def _load_all() -> dict:
-    global _data_cache
+    global _data_cache, _passphrase_cache
     if _data_cache is not None:
         return dict(_data_cache)
 
@@ -150,12 +159,11 @@ def _load_all() -> dict:
                 sys.exit(1)
             try:
                 result = _decrypt(raw, pp)
-                set_passphrase(pp)  # met en cache après succès
+                set_passphrase(pp)
                 _data_cache = result
                 return dict(_data_cache)
             except ValueError:
-                global _passphrase_cache
-                _passphrase_cache = None  # efface le cache pour forcer un nouveau prompt
+                _passphrase_cache = None
                 if attempt < 2:
                     print("  Passphrase incorrecte, reessaie.", file=sys.stderr)
         print("  Echec apres 3 tentatives — cles API inaccessibles.", file=sys.stderr)
@@ -178,16 +186,8 @@ def _save_all(data: dict):
 
 # ── API publique ──────────────────────────────────────────────────────────────
 
-_ENV_MAP = {
-    "urlhaus":    "URLHAUS_API_KEY",
-    "abuseipdb":  "ABUSEIPDB_API_KEY",
-    "virustotal": "VIRUSTOTAL_API_KEY",
-    "shodan":     "SHODAN_API_KEY",
-    "censys":     "CENSYS_API_KEY",
-}
-
 def load_key(service: str) -> str | None:
-    val = os.environ.get(_ENV_MAP.get(service, ""), "").strip()
+    val = os.environ.get(SERVICES.get(service, {}).get("env", ""), "").strip()
     if val:
         return val
     return _load_all().get(service, "").strip() or None
@@ -199,26 +199,42 @@ def save_key_to_config(service: str, key: str):
 
 def load_setting(key: str, default=None):
     """Lit un paramètre non-sensible depuis settings.json (sans passphrase)."""
-    try:
-        data = json.loads(SETTINGS_FILE.read_text())
-        return data.get(key, default)
-    except (FileNotFoundError, json.JSONDecodeError):
-        return default
+    global _settings_cache
+    if _settings_cache is None:
+        try:
+            _settings_cache = json.loads(SETTINGS_FILE.read_text())
+        except (FileNotFoundError, json.JSONDecodeError):
+            _settings_cache = {}
+    return _settings_cache.get(key, default)
 
 def save_setting(key: str, value):
     """Sauvegarde un paramètre non-sensible dans settings.json (sans passphrase)."""
-    try:
-        data = json.loads(SETTINGS_FILE.read_text())
-    except (FileNotFoundError, json.JSONDecodeError):
-        data = {}
-    data[key] = value
+    global _settings_cache
+    if _settings_cache is None:
+        try:
+            _settings_cache = json.loads(SETTINGS_FILE.read_text())
+        except (FileNotFoundError, json.JSONDecodeError):
+            _settings_cache = {}
+    _settings_cache[key] = value
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-    SETTINGS_FILE.write_text(json.dumps(data, indent=2))
+    SETTINGS_FILE.write_text(json.dumps(_settings_cache, indent=2))
 
 def all_keys() -> dict:
     stored = _load_all()
     result = {}
-    for svc in SERVICES:
-        env_val = os.environ.get(_ENV_MAP.get(svc, ""), "").strip()
+    for svc, meta in SERVICES.items():
+        env_val = os.environ.get(meta.get("env", ""), "").strip()
         result[svc] = env_val or stored.get(svc, "").strip()
     return result
+
+def clear_cache():
+    """Efface les caches mémoire (passphrase, données déchiffrées, settings)."""
+    global _passphrase_cache, _data_cache, _env_consumed, _settings_cache
+    _passphrase_cache = None
+    _data_cache = None
+    _env_consumed = False
+    _settings_cache = None
+
+def is_passphrase_set() -> bool:
+    """Vérifie si une passphrase est déjà en cache mémoire."""
+    return _passphrase_cache is not None

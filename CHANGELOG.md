@@ -1,3 +1,8 @@
+## 2026-05-28 (refactor & optimisations)
+- `setup.py` : option reset complet (passphrase oubliée) accessible sans passphrase + proposé automatiquement après 3 échecs
+- `config_loader.py` : import crypto lazy, cache settings, `_ENV_MAP` fusionné dans `SERVICES`
+- Modules : suppressions de doublons et redondances mineures dans `setup.py`, `config_loader.py`, `main.py` et les modules standalone
+
 ## 2026-05-22 (fixes)
 - Passphrase vide (Entrée sans saisir) → arrêt immédiat du script au lieu de continuer sans clés
 - Bouton scroll-to-top : fond bleu + bordure accent + halo, taille 48px — plus visible sur fond sombre

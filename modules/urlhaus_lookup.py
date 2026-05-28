@@ -46,9 +46,6 @@ def badge(text, style):
 def get_api_key(provided=None):
     if provided:
         return provided
-    key = os.environ.get("URLHAUS_API_KEY", "").strip()
-    if key:
-        return key
     key = load_key("urlhaus")
     if key:
         return key

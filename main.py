@@ -1051,7 +1051,7 @@ def run_correlation(target, keys, as_json=False, years=None, cache=None):
             print(c(f"  Fetch VT {label}...", DIM), end="\r", flush=True)
             time.sleep(16)  # free tier : 4 req/min
             try:
-                items, count = _vt_relationship(f"/ip_addresses/{target}/{rel_path.split('/')[-1]}", vt_key)
+                items, count = _vt_relationship(rel_path, vt_key)
                 filtered = filter_vt_files(items, years=years, min_malicious=1)
                 results[key_name] = {"items": filtered, "count": count}
             except Exception as e:
@@ -1073,6 +1073,44 @@ def run_correlation(target, keys, as_json=False, years=None, cache=None):
 
     return result
 
+# ── hash render ───────────────────────────────────────────────────────────────
+
+def _render_hash_result(h: str, results: dict, score: int, signals: list, cached: bool = False):
+    sep("═")
+    cache_s = f"  {c('(cache)', DIM)}" if cached else ""
+    print(f"\n  {c('ThreatHunting — Hash', BOLD, WHITE)}  {c('›', DIM)}  {c(h, CYAN, BOLD)}{cache_s}\n")
+    level_label, level_col = threat_level(score)
+    bar = c("█" * int(score / 5), level_col) + c("░" * (20 - int(score / 5)), DIM)
+    print(f"  {c('Score de menace', BOLD)}  {bar}  {c(f'{score}/100', level_col, BOLD)}  [{level_label}]")
+    print()
+    if signals:
+        print(f"  {c('Signaux détectés', BOLD)}")
+        for s in signals:
+            print(f"    {c('·', DIM)}  {s}")
+    else:
+        print(f"  {c('·  Aucun signal malveillant détecté', GREEN)}")
+    print()
+    sep()
+    print(f"  {c('Détails par source', BOLD)}\n")
+    _render_mini_vt_hash(results.get("virustotal"))
+    _render_mini_urlhaus_hash(results.get("urlhaus"))
+    print()
+    render_urlhaus_hash_section(results.get("urlhaus", {}))
+    render_vt_hash_section(results.get("virustotal", {}))
+    if not cached:
+        skipped = [s for s, d in results.items()
+                   if s not in ("_errors",) and isinstance(d, dict) and d.get("_skipped")]
+        if skipped:
+            sep()
+            print(f"  {c('Sources ignorées (clé manquante)', DIM)}")
+            for src in skipped:
+                svc_url = SERVICES.get(src, {}).get("url", "")
+                print(f"    {c('·', DIM)}  {c(src, DIM):<16}  {c(svc_url, CYAN)}")
+            print()
+            print(f"  → Lance {c('python setup.py', CYAN)} pour configurer les clés manquantes.")
+            print()
+    sep("═")
+
 # ── hash correlation ───────────────────────────────────────────────────────────
 
 def run_hash_correlation(targets: list, keys: dict, as_json: bool = False, export_path: str = None, cache: dict = None) -> list:
@@ -1087,27 +1125,7 @@ def run_hash_correlation(targets: list, keys: dict, as_json: bool = False, expor
             if hit:
                 score, signals = score_from_hash_results(hit["results"])
                 if not as_json:
-                    sep("═")
-                    print(f"\n  {c('ThreatHunting — Hash', BOLD, WHITE)}  {c('›', DIM)}  {c(h, CYAN, BOLD)}  {c('(cache)', DIM)}\n")
-                    level_label, level_col = threat_level(score)
-                    bar = c("█" * int(score / 5), level_col) + c("░" * (20 - int(score / 5)), DIM)
-                    print(f"  {c('Score de menace', BOLD)}  {bar}  {c(f'{score}/100', level_col, BOLD)}  [{level_label}]")
-                    print()
-                    if signals:
-                        print(f"  {c('Signaux détectés', BOLD)}")
-                        for s in signals:
-                            print(f"    {c('·', DIM)}  {s}")
-                    else:
-                        print(f"  {c('·  Aucun signal malveillant détecté', GREEN)}")
-                    print()
-                    sep()
-                    print(f"  {c('Détails par source', BOLD)}\n")
-                    _render_mini_vt_hash(hit["results"].get("virustotal"))
-                    _render_mini_urlhaus_hash(hit["results"].get("urlhaus"))
-                    print()
-                    render_urlhaus_hash_section(hit["results"].get("urlhaus", {}))
-                    render_vt_hash_section(hit["results"].get("virustotal", {}))
-                    sep("═")
+                    _render_hash_result(h, hit["results"], score, signals, cached=True)
                 else:
                     print(json.dumps({**hit, "cached": True}, indent=2))
                 all_results.append(hit)
@@ -1140,39 +1158,7 @@ def run_hash_correlation(targets: list, keys: dict, as_json: bool = False, expor
         score, signals = score_from_hash_results(results)
 
         if not as_json:
-            sep("═")
-            print(f"\n  {c('ThreatHunting — Hash', BOLD, WHITE)}  {c('›', DIM)}  {c(h, CYAN, BOLD)}\n")
-            level_label, level_col = threat_level(score)
-            bar = c("█" * int(score / 5), level_col) + c("░" * (20 - int(score / 5)), DIM)
-            print(f"  {c('Score de menace', BOLD)}  {bar}  {c(f'{score}/100', level_col, BOLD)}  [{level_label}]")
-            print()
-            if signals:
-                print(f"  {c('Signaux détectés', BOLD)}")
-                for s in signals:
-                    print(f"    {c('·', DIM)}  {s}")
-            else:
-                print(f"  {c('·  Aucun signal malveillant détecté', GREEN)}")
-            print()
-            sep()
-            print(f"  {c('Détails par source', BOLD)}\n")
-            _render_mini_vt_hash(results.get("virustotal"))
-            _render_mini_urlhaus_hash(results.get("urlhaus"))
-            print()
-            render_urlhaus_hash_section(results.get("urlhaus", {}))
-            render_vt_hash_section(results.get("virustotal", {}))
-
-            skipped = [s for s, d in results.items()
-                       if s not in ("_errors",) and isinstance(d, dict) and d.get("_skipped")]
-            if skipped:
-                sep()
-                print(f"  {c('Sources ignorées (clé manquante)', DIM)}")
-                for src in skipped:
-                    svc_url = SERVICES.get(src, {}).get("url", "")
-                    print(f"    {c('·', DIM)}  {c(src, DIM):<16}  {c(svc_url, CYAN)}")
-                print()
-                print(f"  → Lance {c('python setup.py', CYAN)} pour configurer les clés manquantes.")
-                print()
-            sep("═")
+            _render_hash_result(h, results, score, signals, cached=False)
         else:
             print(json.dumps({"target": h, "type": "hash", "score": score, "results": results}, indent=2))
 

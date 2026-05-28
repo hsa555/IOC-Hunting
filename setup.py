@@ -11,6 +11,7 @@ Requiert : pip install -r requirements.txt
 """
 
 import sys
+import os
 import re
 import json
 import getpass
@@ -18,23 +19,22 @@ import urllib.request
 import urllib.parse
 import urllib.error
 
-import sys as _sys, os as _os
-_path = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), ".internal")
-if _path not in _sys.path:
-    _sys.path.insert(0, _path)
+_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".internal")
+if _path not in sys.path:
+    sys.path.insert(0, _path)
 from config_loader import (
     CONFIG_FILE, SERVICES,
     load_key, save_key_to_config, all_keys,
     is_encrypted, verify_passphrase, set_passphrase, get_passphrase,
     _load_all, _save_all, _encrypt,
-    load_setting, save_setting,
+    load_setting, save_setting, clear_cache, is_passphrase_set,
 )
 
-RESET  = "\033[0m";  BOLD  = "\033[1m";  DIM  = "\033[2m"
+RST    = "\033[0m";  BOLD  = "\033[1m";  DIM  = "\033[2m"
 RED    = "\033[91m"; GREEN = "\033[92m"; YELLOW = "\033[93m"
 CYAN   = "\033[96m"; WHITE = "\033[97m"
 
-def c(text, *codes): return "".join(codes) + str(text) + RESET
+def c(text, *codes): return "".join(codes) + str(text) + RST
 def sep(ch="─", w=70): print(c(ch * w, DIM))
 
 DESCRIPTIONS = {
@@ -141,23 +141,23 @@ def setup_passphrase():
     sep("═")
 
     if is_encrypted():
-        print(f"\n  {c('Config chiffree detectee.', GREEN)}")
-        print(f"  Entre ta passphrase pour deverrouiller les cles actuelles.\n")
+        if not is_passphrase_set():
+            print(f"\n  {c('Config chiffree detectee.', GREEN)}")
+            print(f"  Entre ta passphrase pour deverrouiller les cles actuelles.\n")
 
-        # déverrouillage
-        for attempt in range(3):
-            pp = get_passphrase(c("  Passphrase actuelle › ", CYAN))
-            if pp is None:
-                print(); sys.exit(0)
-            if verify_passphrase(pp):
-                set_passphrase(pp)
-                print(c("  Deverrouille.", GREEN, BOLD))
-                break
-            print(c("  Passphrase incorrecte.", RED))
-            if attempt == 2:
-                print(c("  Trop de tentatives.", RED)); sys.exit(1)
-        else:
-            sys.exit(1)
+            for attempt in range(3):
+                pp = get_passphrase(c("  Passphrase actuelle › ", CYAN))
+                if pp is None:
+                    print(); sys.exit(0)
+                if verify_passphrase(pp):
+                    set_passphrase(pp)
+                    print(c("  Deverrouille.", GREEN, BOLD))
+                    break
+                print(c("  Passphrase incorrecte.", RED))
+                if attempt == 2:
+                    print(c("  Trop de tentatives.", RED)); sys.exit(1)
+            else:
+                sys.exit(1)
 
         print()
         change = input(c("  Changer la passphrase ? (o/N) › ", DIM)).strip().lower()
@@ -181,7 +181,7 @@ def setup_passphrase():
 
 # ── setup par service ─────────────────────────────────────────────────────────
 
-def setup_service(service):
+def setup_service(service, secret=False):
     meta     = SERVICES[service]
     desc     = DESCRIPTIONS[service]
     existing = load_key(service)
@@ -190,78 +190,52 @@ def setup_service(service):
     sep()
     print(f"  {c(meta['label'], BOLD, WHITE)}")
     print(f"  {c(desc, DIM)}")
-    print(f"  {c('Cle API gratuite :', DIM)} {c(meta['url'], CYAN)}")
+    if secret:
+        print(f"  {c('Personal Access Token :', DIM)} {c(meta['url'], CYAN)}")
+        print(f"  {c('Format               :', DIM)} {c('censys_XXXXXXXX_XXXXXXXXXXXXXXXXXX', DIM)}")
+    else:
+        print(f"  {c('Cle API gratuite :', DIM)} {c(meta['url'], CYAN)}")
 
     if existing:
-        masked = existing[:6] + "..." + existing[-4:] if len(existing) > 12 else "***"
-        print(f"  {c('Cle actuelle:', DIM)} {c(masked, DIM)}")
-        if input(c("  Garder cette cle ? (O/n) › ", DIM)).strip().lower() != "n":
-            return existing
+        if secret:
+            masked = existing[:14] + "..." if len(existing) > 14 else "***"
+            print(f"  {c('Token actuel:', DIM)} {c(masked, DIM)}")
+            if input(c("  Garder ce token ? (O/n) › ", DIM)).strip().lower() != "n":
+                return existing
+        else:
+            masked = existing[:6] + "..." + existing[-4:] if len(existing) > 12 else "***"
+            print(f"  {c('Cle actuelle:', DIM)} {c(masked, DIM)}")
+            if input(c("  Garder cette cle ? (O/n) › ", DIM)).strip().lower() != "n":
+                return existing
 
-    key = input(c("  Colle ta cle API (vide = ignorer) › ", CYAN)).strip()
+    if secret:
+        try:
+            key = getpass.getpass(c("  Personal Access Token › ", CYAN)).strip()
+        except (EOFError, KeyboardInterrupt):
+            print(); return existing or ""
+    else:
+        key = input(c("  Colle ta cle API (vide = ignorer) › ", CYAN)).strip()
+
     if not key:
         print(c("  Ignore.", DIM))
         return existing or ""
 
-    print(c("  Test de la cle...", DIM), end=" ", flush=True)
+    label = "  Test du token..." if secret else "  Test de la cle..."
+    print(c(label, DIM), end=" ", flush=True)
     ok, err = try_test(service, key)
     if ok:
         print(c("OK", GREEN, BOLD))
         save_key_to_config(service, key)
     else:
         print(c(f"Echec ({err or 'inconnu'})", YELLOW))
-        print(c("  La cle sera sauvegardee quand meme.", DIM))
         if input(c("  Sauvegarder quand meme ? (O/n) › ", DIM)).strip().lower() != "n":
             save_key_to_config(service, key)
         else:
             return existing or ""
     return key
 
-# ── setup Censys (clé composite api_id:api_secret) ───────────────────────────
-
-def setup_censys():
-    meta     = SERVICES["censys"]
-    existing = load_key("censys")
-
-    print()
-    sep()
-    print(f"  {c(meta['label'], BOLD, WHITE)}")
-    print(f"  {c(DESCRIPTIONS['censys'], DIM)}")
-    print(f"  {c('Personal Access Token :', DIM)} {c(meta['url'], CYAN)}")
-    print(f"  {c('Format               :', DIM)} {c('censys_XXXXXXXX_XXXXXXXXXXXXXXXXXX', DIM)}")
-
-    if existing:
-        masked = existing[:14] + "..." if len(existing) > 14 else "***"
-        print(f"  {c('Token actuel:', DIM)} {c(masked, DIM)}")
-        if input(c("  Garder ce token ? (O/n) › ", DIM)).strip().lower() != "n":
-            return existing
-
-    try:
-        key = getpass.getpass(c("  Personal Access Token › ", CYAN)).strip()
-    except (EOFError, KeyboardInterrupt):
-        print(); return existing or ""
-    if not key:
-        print(c("  Ignore.", DIM))
-        return existing or ""
-
-    print(c("  Test du token...", DIM), end=" ", flush=True)
-    ok, err = try_test("censys", key)
-    if ok:
-        print(c("OK", GREEN, BOLD))
-        save_key_to_config("censys", key)
-    else:
-        print(c(f"Echec ({err or 'inconnu'})", YELLOW))
-        if input(c("  Sauvegarder quand meme ? (O/n) › ", DIM)).strip().lower() != "n":
-            save_key_to_config("censys", key)
-        else:
-            return existing or ""
-    return key
-
 def _setup_any(svc):
-    if svc == "censys":
-        setup_censys()
-    else:
-        setup_service(svc)
+    setup_service(svc, secret=(svc == "censys"))
 
 # ── cache ─────────────────────────────────────────────────────────────────────
 
@@ -393,8 +367,25 @@ def _unlock():
             print(c("  Déverrouillé.", GREEN))
             return
         print(c("  Passphrase incorrecte.", RED))
-        if attempt == 2:
-            print(c("  Trop de tentatives.", RED)); sys.exit(1)
+
+    # 3 échecs — proposer un reset
+    print()
+    print(c("  Trop de tentatives échouées.", RED))
+    print(c("  Passphrase oubliée ? Tu peux réinitialiser toute la configuration.", YELLOW))
+    print(f"  {c('(les clés API chiffrées seront perdues)', DIM)}")
+    print()
+    try:
+        choix = input(c("  Réinitialiser ? (oui/N) › ", RED)).strip().lower()
+    except (EOFError, KeyboardInterrupt):
+        print(); sys.exit(0)
+
+    if choix == "oui":
+        done = _do_reset()
+        if done:
+            print_summary()
+        sys.exit(0)
+    else:
+        sys.exit(1)
 
 def _change_passphrase():
     """Propose de changer la passphrase (passphrase actuelle déjà en cache mémoire)."""
@@ -403,6 +394,53 @@ def _change_passphrase():
     set_passphrase(new_pp)
     _save_all(existing)
     print(c("  Passphrase mise à jour.", GREEN, BOLD))
+
+def _do_reset() -> bool:
+    """
+    Supprime la config chiffrée et repart de zéro.
+    Utilisé quand la passphrase est oubliée ou pour un reset complet volontaire.
+    Retourne True si le reset a été effectué, False si annulé.
+    """
+    print()
+    sep("═")
+    print(f"  {c('Reset complet de la configuration', BOLD, RED)}")
+    print()
+    print(f"  {c('Ce que va faire le reset :', BOLD, WHITE)}")
+    print(f"    {c('·', DIM)}  Suppression du fichier de clés chiffré")
+    print(f"    {c('·', DIM)}  Perte définitive de toutes les clés API stockées")
+    print(f"    {c('·', DIM)}  Création d'une nouvelle passphrase")
+    print(f"    {c('·', DIM)}  Re-saisie de toutes les clés API")
+    print()
+    print(f"  {c('Les paramètres (cache, port) sont conservés.', DIM)}")
+    sep("═")
+    print()
+    print(c("  Pour confirmer, tape exactement :  RESET", YELLOW))
+    print()
+    try:
+        confirm = input(c("  › ", RED)).strip()
+    except (EOFError, KeyboardInterrupt):
+        print(); print(c("  Annulé.", DIM)); return False
+
+    if confirm != "RESET":
+        print(c("  Annulé.", DIM))
+        return False
+
+    # Suppression du fichier de clés
+    if CONFIG_FILE.exists():
+        CONFIG_FILE.unlink()
+        print(c("  Fichier de clés supprimé.", GREEN))
+
+    # Nettoyage des caches mémoire
+    clear_cache()
+
+    print()
+    print(c("  Nouvelle configuration...", DIM))
+    setup_passphrase()
+    setup_cache()
+    setup_web_port()
+    for svc in SERVICES:
+        _setup_any(svc)
+    return True
 
 def _run_keys_menu():
     """Sous-menu : choisir quelle(s) clé(s) API modifier."""
@@ -451,6 +489,7 @@ def _run_change_menu():
         print(f"  {c('3', BOLD)}  Durée du cache")
         print(f"  {c('4', BOLD)}  Port interface web")
         print(f"  {c('5', BOLD)}  Tout reconfigurer")
+        print(f"  {c('6', BOLD)}  {c('Reset complet', RED)}  {c('(supprime les clés — nouvelle passphrase)', DIM)}")
         print(f"  {c('q', BOLD)}  Quitter")
         print()
         try:
@@ -475,6 +514,10 @@ def _run_change_menu():
             for svc in SERVICES:
                 _setup_any(svc)
             break
+        elif choix == "6":
+            done = _do_reset()
+            if done:
+                break
         else:
             print(c("  Choix invalide.", DIM))
 
@@ -484,7 +527,22 @@ def main():
     print_banner()
 
     if CONFIG_FILE.exists():
-        # Config existante → déverrouille puis affiche le menu de modification
+        if is_encrypted():
+            # Proposer le reset avant de demander la passphrase
+            print(f"  {c('1', BOLD)}  Déverrouiller  {c('(passphrase requise)', DIM)}")
+            print(f"  {c('2', BOLD)}  {c('Reset complet', RED)}  {c('(passphrase oubliée — supprime les clés)', DIM)}")
+            print()
+            try:
+                choix = input(c("  Choix › ", CYAN)).strip()
+            except (EOFError, KeyboardInterrupt):
+                print(); return
+
+            if choix == "2":
+                done = _do_reset()
+                if done:
+                    print_summary()
+                return
+
         _unlock()
         _run_change_menu()
     else:

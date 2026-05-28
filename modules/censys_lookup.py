@@ -40,9 +40,6 @@ def sep(ch="─", w=70): print(c(ch * w, DIM))
 def get_api_key(provided=None):
     if provided:
         return provided
-    key = os.environ.get("CENSYS_API_KEY", "").strip()
-    if key:
-        return key
     key = load_key("censys")
     if key:
         return key

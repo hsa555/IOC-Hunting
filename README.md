@@ -58,6 +58,8 @@ python3 setup.py
 
 `setup.py` configure les clés API (chiffrées) et la durée du cache (24h par défaut). À relancer pour modifier une valeur.
 
+> **Passphrase oubliée ?** Lance `python3 setup.py` et choisis **2 — Reset complet** (accessible sans passphrase). Toutes les clés chiffrées sont supprimées et une nouvelle configuration repart de zéro.
+
 ---
 
 ## Sources et clés API (toutes gratuites)
