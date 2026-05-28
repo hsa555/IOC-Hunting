@@ -52,7 +52,7 @@ Outil de threat hunting en ligne de commande qui corrèle automatiquement plusie
 ## Installation
 
 ```bash
-cd ThreatHunting
+cd IOCHunting
 pip install -r requirements.txt
 python3 setup.py
 ```
