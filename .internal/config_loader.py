@@ -16,11 +16,12 @@ CONFIG_FILE   = CONFIG_DIR / "keys.json"
 SETTINGS_FILE = CONFIG_DIR / "settings.json"  # paramètres non-sensibles (pas chiffrés)
 
 SERVICES = {
-    "urlhaus":    {"label": "URLhaus (abuse.ch)",  "url": "https://auth.abuse.ch/",                   "env": "URLHAUS_API_KEY"},
-    "abuseipdb":  {"label": "AbuseIPDB",           "url": "https://www.abuseipdb.com/account/api",    "env": "ABUSEIPDB_API_KEY"},
-    "virustotal": {"label": "VirusTotal",           "url": "https://www.virustotal.com/gui/my-apikey", "env": "VIRUSTOTAL_API_KEY"},
-    "shodan":     {"label": "Shodan",               "url": "https://account.shodan.io/",               "env": "SHODAN_API_KEY"},
-    "censys":     {"label": "Censys",               "url": "https://search.censys.io/account/api",     "env": "CENSYS_API_KEY"},
+    "urlhaus":    {"label": "URLhaus (abuse.ch)",          "url": "https://auth.abuse.ch/",                          "env": "URLHAUS_API_KEY"},
+    "abuseipdb":  {"label": "AbuseIPDB",                   "url": "https://www.abuseipdb.com/account/api",           "env": "ABUSEIPDB_API_KEY"},
+    "virustotal": {"label": "VirusTotal",                  "url": "https://www.virustotal.com/gui/my-apikey",        "env": "VIRUSTOTAL_API_KEY"},
+    "shodan":     {"label": "Shodan",                      "url": "https://account.shodan.io/",                      "env": "SHODAN_API_KEY"},
+    "censys":     {"label": "Censys",                      "url": "https://search.censys.io/account/api",            "env": "CENSYS_API_KEY"},
+    "serpapi":    {"label": "SerpAPI",                     "url": "https://serpapi.com/",                            "env": "SERPAPI_KEY"},
 }
 
 _ENV_VAR          = "THREAT_HUNTING_PASSPHRASE"

@@ -40,6 +40,7 @@ Outil de threat hunting en ligne de commande qui corrèle automatiquement plusie
 - **Hachage local de fichiers** : calcule le SHA256 de fichiers/répertoires locaux, puis les interroge
 - **Scan de répertoire** : si un répertoire est fourni à la place d'un fichier, tous les fichiers sont traités
 - **Cache des résultats** : évite de reconsommer du quota API — durée configurable via `setup.py` (24h par défaut), purgé automatiquement au lancement. Option `--nocache` pour forcer des requêtes fraîches
+- **Google Dorks** (`--dorks` / prompt interactif) : recherche Google via SerpAPI des mentions d'une IP sur le web ouvert (forums, listes GitHub, rapports CTI) — résultats triés par pertinence CTI (botnet, malware, phishing, APT…), exclusion automatique des scanners/blacklists connus
 - **Interface web locale** (`--web`) : UI dark-theme dans le navigateur, bind uniquement sur 127.0.0.1, protection CSRF, une carte de résultat par cible, nav cliquable pour multi-cibles, téléchargement JSON
 - **Chiffrement des clés API** : Fernet/AES-128-CBC + PBKDF2-HMAC-SHA256 (480 000 itérations)
 - **Export JSON** du rapport complet
@@ -71,6 +72,7 @@ python3 setup.py
 | Shodan | Ports ouverts, CVEs, services | Optionnelle* | https://account.shodan.io/ |
 | Censys | Ports ouverts, services détaillés | Oui | https://app.censys.io/user/tokens |
 | URLhaus | URLs malveillantes, hashes malwares | Oui | https://auth.abuse.ch/ |
+| SerpAPI | Google Dorks — mentions web (forums, GitHub, rapports CTI) | Optionnelle | https://serpapi.com/ |
 
 *Sans clé Shodan, l'outil utilise automatiquement **Shodan InternetDB** (gratuit, sans clé, ports/vulns/hostnames).
 
@@ -120,6 +122,9 @@ python3 main.py 1.2.3.4 --offline
 
 # Lancer l'interface web locale
 python3 main.py --web
+
+# Google Dorks (standalone)
+python3 modules/googledorks_lookup.py 1.2.3.4
 ```
 
 ### Interface web locale (`--web`)
@@ -144,6 +149,21 @@ python3 main.py --web
 - Validation : erreur si plusieurs cibles sur une même ligne (séparées par espace)
 
 > **Note** : nécessite Flask (`pip install flask` ou `pip install -r requirements.txt`). Ne jamais lancer en root sur un serveur partagé.
+
+### Google Dorks (mentions web)
+
+Lance une recherche Google via **SerpAPI** pour trouver les mentions de l'IP sur le web ouvert : forums, listes GitHub, rapports CTI, write-ups, etc.
+
+- **Mode interactif** : après chaque analyse IP, le script propose `Google Dorks ? (o/N)`. Répond `o` pour lancer la recherche.
+- **Standalone** :
+
+```bash
+python3 modules/googledorks_lookup.py 1.2.3.4
+python3 modules/googledorks_lookup.py 1.2.3.4 --num 20
+```
+
+- **Clé SerpAPI** : plan gratuit = **100 requêtes/mois** (3 req par analyse : page 1 + page 2 + sous-réseau /24). Configure via `python setup.py`.
+- **Filtrage** : les scanners d'IP (ipinfo, AbuseIPDB, Shodan…) et blacklists sont exclus automatiquement. Les résultats contenant des mots-clés CTI (botnet, malware, phishing, APT…) remontent en premier.
 
 ### Hachage de fichiers locaux (mode hash)
 
@@ -258,11 +278,12 @@ ThreatHunting/
 ├── .internal/
 │   └── config_loader.py  ← chiffrement Fernet, lecture/écriture des clés
 └── modules/
-    ├── abuseipdb_lookup.py   ← AbuseIPDB standalone
-    ├── censys_lookup.py      ← Censys standalone
-    ├── shodan_lookup.py      ← Shodan standalone (+ InternetDB fallback)
-    ├── urlhaus_lookup.py     ← URLhaus standalone
-    └── virustotal_lookup.py  ← VirusTotal standalone (IP / URL / Hash / --full)
+    ├── abuseipdb_lookup.py     ← AbuseIPDB standalone
+    ├── censys_lookup.py        ← Censys standalone
+    ├── googledorks_lookup.py   ← Google Dorks via SerpAPI standalone
+    ├── shodan_lookup.py        ← Shodan standalone (+ InternetDB fallback)
+    ├── urlhaus_lookup.py       ← URLhaus standalone
+    └── virustotal_lookup.py    ← VirusTotal standalone (IP / URL / Hash / --full)
 ```
 
 ---

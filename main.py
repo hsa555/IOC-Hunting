@@ -332,6 +332,33 @@ def fetch_censys(ip, key):
             return {"_error": "quota atteint (250 req/mois — plan gratuit)"}
         raise
 
+_GD_PRIORITY_KEYWORDS = {
+    "botnet", "malware", "phishing", "ransomware", "c2", "c&c", "command and control",
+    "threat", "ioc", "indicator", "compromise", "exploit", "trojan", "rat ", "backdoor",
+    "campaign", "apt", "intrusion", "attack", "payload",
+}
+
+def _gd_priority_score(item: dict) -> int:
+    """Retourne 1 si l'item contient un mot-clé CTI dans le titre/snippet/url, 0 sinon."""
+    text = " ".join([
+        (item.get("title") or ""),
+        (item.get("snippet") or ""),
+        (item.get("link") or ""),
+    ]).lower()
+    return 1 if any(kw in text for kw in _GD_PRIORITY_KEYWORDS) else 0
+
+def fetch_googledorks(target: str, key: str) -> dict:
+    if not key:
+        return {"_skipped": "no key"}
+    try:
+        from modules.googledorks_lookup import query as _gd_query, _filter as _gd_filter
+        data  = _gd_query(target, key)
+        items = _gd_filter(data.get("organic_results") or [], target)
+        items.sort(key=_gd_priority_score, reverse=True)
+        return {"items": items, "total": str(data.get("total", ""))}
+    except Exception as e:
+        return {"_error": str(e)}
+
 def safe_fetch(name, fn, *args):
     """Enveloppe une fonction fetch dans un try/except pour ThreadPoolExecutor.
     Retourne (nom, données, erreur_str). KeyboardInterrupt n'est PAS attrapé —
@@ -883,6 +910,19 @@ def render_vt_hash_section(data: dict):
     _render_sigma_rules(attr)
     _render_crowdsourced_ids(attr)
     _render_sandbox_verdicts(attr)
+
+def render_googledorks_section(data: dict, target: str):
+    if not data:
+        return
+    if data.get("_error"):
+        sep()
+        print(f"  {c('Google Dorks', BOLD, WHITE)}")
+        print(f"\n  {c('Erreur : ' + data['_error'][:120], RED)}\n")
+        return
+    if data.get("_skipped"):
+        return
+    from modules.googledorks_lookup import render as _gd_render
+    _gd_render(target, data.get("items", []), total=data.get("total", ""))
 
 def render_details(target, kind, results, years=None, as_json=False, show_offline=False):
     if as_json:
@@ -1443,6 +1483,17 @@ def _run_ip_interactive(keys: dict, years, cache=None, show_offline=False):
         r = run_correlation(target, keys, years=years, cache=cache, show_offline=show_offline,
                             single_target=single)
         all_results.append(r)
+        serpapi_key = keys.get("serpapi", "")
+        if serpapi_key:
+            try:
+                dorks_ans = input(c("  Google Dorks ? (o/N)  ", DIM) + c("déconseillé sur grosse liste d'IPs", YELLOW) + c(" › ", DIM)).strip().lower()
+            except EOFError:
+                dorks_ans = "n"
+            if dorks_ans == "o":
+                print(c("  Recherche Google Dorks...", DIM), end="\r", flush=True)
+                gd_data = fetch_googledorks(target, serpapi_key)
+                print(" " * 40, end="\r")
+                render_googledorks_section(gd_data, target)
     if export:
         with open(export, "w") as fh:
             json.dump(all_results, fh, indent=2)

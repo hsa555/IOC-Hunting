@@ -43,6 +43,7 @@ DESCRIPTIONS = {
     "virustotal": "Scan multi-antivirus d'IPs, URLs et fichiers/hashes",
     "shodan":     "Donnees d'indexation reseau (ports, services, vulnerabilites)",
     "censys":     "Ports ouverts et services (250 req/mois gratuit)",
+    "serpapi":    "Google Dorks — recherche de mentions d'IPs/domaines sur le web (100 req/mois gratuit)",
 }
 
 # ── tests de clés ─────────────────────────────────────────────────────────────
@@ -90,12 +91,21 @@ def test_censys(key):
         r = json.loads(resp.read().decode())
         return "result" in r
 
+def test_serpapi(key):
+    params = urllib.parse.urlencode({"api_key": key, "engine": "google", "q": "test", "num": 1})
+    req = urllib.request.Request(f"https://serpapi.com/search?{params}")
+    req.add_header("Accept", "application/json")
+    with urllib.request.urlopen(req, timeout=8) as resp:
+        r = json.loads(resp.read().decode())
+        return "organic_results" in r or "search_information" in r
+
 TESTERS = {
     "urlhaus":    test_urlhaus,
     "abuseipdb":  test_abuseipdb,
     "virustotal": test_virustotal,
     "shodan":     test_shodan,
     "censys":     test_censys,
+    "serpapi":    test_serpapi,
 }
 
 def try_test(service, key):

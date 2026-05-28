@@ -1,3 +1,12 @@
+## 2026-05-28 (Google Dorks)
+- Nouveau module `modules/googledorks_lookup.py` : recherche Google via SerpAPI (100 req/mois gratuit)
+- Intégré dans `main.py` : prompt "Google Dorks ? (o/N)" après chaque analyse IP interactive
+- 3 requêtes SerpAPI par analyse : page 1 (start=0) + page 2 (start=10) + sous-réseau /24
+- Résultats triés par pertinence CTI (botnet, malware, phishing, APT, C2… remontent en premier)
+- Exclusion à deux niveaux : `-site:` operators dans la requête + post-filtre liste complète (~90 domaines)
+- Clé SerpAPI configurable via `setup.py` (stockée chiffrée comme les autres clés)
+- `googledorks_lookup.py` standalone : `python3 modules/googledorks_lookup.py <ip> [--num N] [--json]`
+
 ## 2026-05-28 (URLhaus & VT)
 - Payloads URLhaus : URL source affichée, badge online/offline, filtre online-only par défaut, `--offline` pour tout afficher
 - VT rate limit : 5s entre calls pour une seule IP, sliding window 60s pour plusieurs IPs

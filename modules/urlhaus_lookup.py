@@ -148,6 +148,7 @@ def render(url_target, data, as_json=False):
             vt   = p.get("virustotal_percent")
             vt_s = c(f"VT:{vt}%", RED, BOLD) if vt and float(vt) > 0 else c("VT:n/a", DIM)
             print(f"  {c(f'{i:>3}.', DIM)} {c(sig, RED, BOLD)}  {c(f'[{ftyp}]', YELLOW)}  {vt_s}")
+            if p.get("url"):       print(f"        {c('URL:   ', DIM)} {c(p['url'], CYAN)}")
             if p.get("sha256"):    print(f"        {c('SHA256:', DIM)} {c(p['sha256'], DIM)}")
             if p.get("md5"):       print(f"        {c('MD5:   ', DIM)} {c(p['md5'], DIM)}")
             if p.get("filename"):  print(f"        {c('File:  ', DIM)} {p['filename']}")
