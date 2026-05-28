@@ -13,7 +13,7 @@
                      '             '`*'´'                   `¨'                               `¨'
 ```
 
-# ThreatHunting
+# IOC Hunting
 
 **Made by hsa5**
 
@@ -195,7 +195,7 @@ Affiche un menu principal avec trois modes :
 python3 setup.py
 ```
 
-Les clés sont stockées chiffrées dans `~/.config/threat_hunting/keys.json`.
+Les clés sont stockées chiffrées dans `~/.config/ioc_hunting/keys.json`.
 
 La passphrase de déchiffrement peut être fournie de trois façons :
 
@@ -270,7 +270,7 @@ Tous supportent : `--file`, `--json`, `--export`, `--key`.
 ## Structure du projet
 
 ```
-ThreatHunting/
+IOC Hunting/
 ├── main.py               ← point d'entrée principal (corrélation + hash)
 ├── setup.py              ← configuration et chiffrement des clés API
 ├── requirements.txt      ← dépendances Python (pip install -r requirements.txt)
@@ -292,13 +292,13 @@ ThreatHunting/
 
 Si la cible a déjà été analysée dans la durée du cache configurée (24h par défaut), le résultat est chargé depuis le cache (sans appel API) :
 ```
-  ThreatHunting  ›  1.2.3.4  (cache)
+  IOC Hunting  ›  1.2.3.4  (cache)
 ```
 
 ```
 ════════════════════════════════════════════════════════════════════════
 
-  ThreatHunting  ›  1.2.3.4
+  IOC Hunting  ›  1.2.3.4
 
   Score de menace  ████████████████░░░░  80/100  [CRITIQUE]
 
@@ -322,7 +322,7 @@ Si la cible a déjà été analysée dans la durée du cache configurée (24h pa
 ```
 ════════════════════════════════════════════════════════════════════════
 
-  ThreatHunting — Hash  ›  db349b97c37d22f5ea1d1841e3c89eb4
+  IOC Hunting — Hash  ›  db349b97c37d22f5ea1d1841e3c89eb4
 
   Score de menace  ████████████████████  95/100  [CRITIQUE]
 

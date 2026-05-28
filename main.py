@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # Made by hsa5
 """
-ThreatHunting — Corrélation multi-sources
+IOC Hunting — Corrélation multi-sources
 ==========================================
 Point d'entrée principal. Deux modes d'analyse :
 
@@ -116,12 +116,12 @@ def ts_to_year(ts) -> int | None:
         return None
 
 # ── cache ──────────────────────────────────────────────────────────────────────
-# Stocke les résultats d'analyse dans ~/.config/threat_hunting/cache.json
+# Stocke les résultats d'analyse dans ~/.config/ioc_hunting/cache.json
 # Format : { "cible|years": {"ts": float, "data": {...}} }
 # Expiration : 24h glissantes (pas par jour calendaire, pour éviter les coupures à minuit)
 # Désactivable via --nocache pour forcer des requêtes API fraîches
 
-_CACHE_FILE = os.path.expanduser("~/.config/threat_hunting/cache.json")
+_CACHE_FILE = os.path.expanduser("~/.config/ioc_hunting/cache.json")
 _CACHE_MAX  = 500   # nombre max d'entrées avant avertissement
 _CACHE_TTL  = 86400 # durée par défaut (24h) — remplacée au lancement par la config
 
@@ -521,7 +521,7 @@ def score_from_hash_results(results: dict) -> tuple:
 def render_summary(target, results, score, signals, cached=False):
     sep("═")
     cache_s = c("  (cache)", DIM) if cached else ""
-    print(f"\n  {c('ThreatHunting', BOLD, WHITE)}  {c('›', DIM)}  {c(target, CYAN, BOLD)}{cache_s}\n")
+    print(f"\n  {c('IOC Hunting', BOLD, WHITE)}  {c('›', DIM)}  {c(target, CYAN, BOLD)}{cache_s}\n")
     level_label, level_col = threat_level(score)
     bar = c("█" * int(score / 5), level_col) + c("░" * (20 - int(score / 5)), DIM)
     print(f"  {c('Score de menace', BOLD)}  {bar}  {c(f'{score}/100', level_col, BOLD)}  [{level_label}]")
@@ -1156,7 +1156,7 @@ def run_correlation(target, keys, as_json=False, years=None, cache=None, show_of
 def _render_hash_result(h: str, results: dict, score: int, signals: list, cached: bool = False):
     sep("═")
     cache_s = f"  {c('(cache)', DIM)}" if cached else ""
-    print(f"\n  {c('ThreatHunting — Hash', BOLD, WHITE)}  {c('›', DIM)}  {c(h, CYAN, BOLD)}{cache_s}\n")
+    print(f"\n  {c('IOC Hunting — Hash', BOLD, WHITE)}  {c('›', DIM)}  {c(h, CYAN, BOLD)}{cache_s}\n")
     level_label, level_col = threat_level(score)
     bar = c("█" * int(score / 5), level_col) + c("░" * (20 - int(score / 5)), DIM)
     print(f"  {c('Score de menace', BOLD)}  {bar}  {c(f'{score}/100', level_col, BOLD)}  [{level_label}]")
@@ -1541,7 +1541,7 @@ def main():
     """
     parser = argparse.ArgumentParser(
         prog="main",
-        description="ThreatHunting — corrélation multi-sources (IP/URL ou Hash)",
+        description="IOC Hunting — corrélation multi-sources (IP/URL ou Hash)",
     )
     parser.add_argument("targets", nargs="*", help="IPs, URLs ou hashes")
     parser.add_argument("--file",   "-f",  help="Fichier de cibles (une par ligne)")
@@ -1678,7 +1678,7 @@ def main():
     def _print_main_menu():
         print()
         print(c("  ╔═════════════════════════════════════════════════════╗", CYAN))
-        print(c("  ║  ", CYAN) + c("ThreatHunting", BOLD, WHITE) + c(" — Choix du mode d'analyse         ║", CYAN))
+        print(c("  ║  ", CYAN) + c("IOC Hunting", BOLD, WHITE) + c(" — Choix du mode d'analyse         ║", CYAN))
         print(c("  ╚═════════════════════════════════════════════════════╝", CYAN))
         print()
         print(f"  {c('1', BOLD)}  Analyser une IP / URL   "

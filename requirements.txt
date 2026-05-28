@@ -1,4 +1,4 @@
-# ThreatHunting — dépendances Python
+# IOC Hunting — dépendances Python
 # Installation : pip install -r requirements.txt
 #
 # Python 3.10+ requis (syntaxe `set | None` dans les annotations de type).

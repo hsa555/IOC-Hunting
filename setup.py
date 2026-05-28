@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 # Made by hsa5
 """
-Setup — configuration des clés API pour ThreatHunting
+Setup — configuration des clés API pour IOC Hunting
 Lance ce script une seule fois après avoir récupéré les scripts.
 
 Les clés sont chiffrées (Fernet/AES) et stockées dans
-~/.config/threat_hunting/keys.json (chmod 600).
+~/.config/ioc_hunting/keys.json (chmod 600).
 
 Requiert : pip install -r requirements.txt
 """
@@ -314,7 +314,7 @@ def setup_cache():
 def print_banner():
     print()
     print(c("  ╔══════════════════════════════════════════════╗", CYAN))
-    print(c("  ║  ", CYAN) + c("ThreatHunting — Setup des cles API", BOLD, WHITE) + c("       ║", CYAN))
+    print(c("  ║  ", CYAN) + c("IOC Hunting — Setup des cles API", BOLD, WHITE) + c("       ║", CYAN))
     print(c("  ╚══════════════════════════════════════════════╝", CYAN))
     print()
     for svc, meta in SERVICES.items():

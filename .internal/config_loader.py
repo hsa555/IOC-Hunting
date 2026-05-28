@@ -1,5 +1,5 @@
 """
-Shared config loader — lit/écrit ~/.config/threat_hunting/keys.json
+Shared config loader — lit/écrit ~/.config/ioc_hunting/keys.json
 Chiffrement : Fernet (AES-128-CBC + HMAC-SHA256) via PBKDF2-HMAC-SHA256 (480 000 iter.)
 Passphrase  : variable d'env THREAT_HUNTING_PASSPHRASE, cache mémoire, ou prompt interactif
 """
@@ -11,7 +11,7 @@ import base64
 import getpass
 from pathlib import Path
 
-CONFIG_DIR    = Path.home() / ".config" / "threat_hunting"
+CONFIG_DIR    = Path.home() / ".config" / "ioc_hunting"
 CONFIG_FILE   = CONFIG_DIR / "keys.json"
 SETTINGS_FILE = CONFIG_DIR / "settings.json"  # paramètres non-sensibles (pas chiffrés)
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Interface web locale — ThreatHunting
+Interface web locale — IOC Hunting
 Bind uniquement sur 127.0.0.1, jamais exposé sur le réseau.
 Protection CSRF : token aléatoire généré au lancement, vérifié sur chaque POST.
 """
@@ -70,7 +70,7 @@ _HTML = r"""<!DOCTYPE html>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>ThreatHunting</title>
+<title>IOC Hunting</title>
 <style>
 :root {
   --bg:      #0d1117;
@@ -328,7 +328,7 @@ footer{
 <body>
 
 <header>
-  <h1>ThreatHunting</h1>
+  <h1>IOC Hunting</h1>
   <span class="badge">web</span>
   <span class="live">
     <span class="dot"></span>
@@ -392,7 +392,7 @@ footer{
 <div class="side-nav" id="side-nav"></div>
 <div class="scroll-top" id="scroll-top" title="Retour en haut">↑</div>
 
-<footer>ThreatHunting — interface locale · 127.0.0.1 uniquement · Made by hsa5</footer>
+<footer>IOC Hunting — interface locale · 127.0.0.1 uniquement · Made by hsa5</footer>
 
 <script>
 const form       = document.getElementById('f');
