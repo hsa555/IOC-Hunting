@@ -115,6 +115,9 @@ python3 main.py 1.2.3.4 --json
 # Forcer les requêtes API (ignore le cache)
 python3 main.py 1.2.3.4 --nocache
 
+# Afficher aussi les payloads URLhaus offline (online-only par défaut)
+python3 main.py 1.2.3.4 --offline
+
 # Lancer l'interface web locale
 python3 main.py --web
 ```

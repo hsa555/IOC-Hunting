@@ -651,7 +651,7 @@ def render_censys_services(data):
             print(f"    {c('Labels:', DIM)}  {c(', '.join(labels[:4]), CYAN)}")
     print()
 
-def render_urlhaus_hashes(data):
+def render_urlhaus_hashes(data, show_offline=False):
     """Affiche les hashes des payloads malwares associés à une IP/host dans URLhaus.
     Ces payloads sont collectés en phase 1b via des requêtes individuelles sur chaque URL."""
     if not data or data.get("_skipped") or data.get("_error"):
@@ -659,24 +659,39 @@ def render_urlhaus_hashes(data):
     payloads = data.get("payloads") or []
     if not payloads:
         return
+    if not show_offline:
+        visible = [p for p in payloads if p.get("_url_status") != "offline"]
+        hidden  = len(payloads) - len(visible)
+    else:
+        visible = payloads
+        hidden  = 0
+    if not visible and not show_offline:
+        return
     sep()
     print(f"  {c('URLhaus — Payloads / Hashes malwares', BOLD, WHITE)}"
-          f"  {c(f'({len(payloads)} payload(s))', DIM)}\n")
-    for p in payloads:
-        sig   = p.get("signature") or "unknown"
-        ftype = p.get("file_type") or "?"
-        sha   = p.get("response_sha256") or p.get("sha256") or ""
-        md5   = p.get("response_md5")   or p.get("md5") or ""
-        date  = (p.get("firstseen") or "")[:10]
-        fname = p.get("filename") or ""
-        vt    = p.get("virustotal") or {}
-        vt_r  = vt.get("result", "")
-        vt_p  = vt.get("percent", "")
+          f"  {c(f'({len(visible)} payload(s))', DIM)}\n")
+    for p in visible:
+        sig       = p.get("signature") or "unknown"
+        ftype     = p.get("file_type") or "?"
+        sha       = p.get("response_sha256") or p.get("sha256") or ""
+        md5       = p.get("response_md5")   or p.get("md5") or ""
+        url       = p.get("url") or ""
+        date      = (p.get("firstseen") or "")[:10]
+        fname     = p.get("filename") or ""
+        vt        = p.get("virustotal") or {}
+        vt_r      = vt.get("result", "")
+        vt_p      = vt.get("percent", "")
+        status    = p.get("_url_status", "")
+        status_s  = (c(" ONLINE ", GREEN + BOLD) if status == "online"
+                     else c(" offline ", DIM) if status == "offline"
+                     else "")
 
         print(f"    {c('⚠', RED)}  {c(sig, RED, BOLD):<30}  "
-              f"{c(f'[{ftype}]', YELLOW)}  {c(date, DIM)}")
+              f"{c(f'[{ftype}]', YELLOW)}  {c(date, DIM)}  {status_s}")
         if fname:
             print(f"         {c('Fichier :', DIM)}  {c(fname, WHITE)}")
+        if url:
+            print(f"         {c('URL     :', DIM)}  {c(url, CYAN)}")
         if sha:
             print(f"         {c('SHA256  :', DIM)}  {c(sha, CYAN, BOLD)}")
         if md5:
@@ -685,6 +700,8 @@ def render_urlhaus_hashes(data):
             col = RED if vt_p and float(vt_p) > 0 else DIM
             print(f"         {c('VT      :', DIM)}  {c(f'{vt_r}  ({vt_p}%)', col)}")
         print()
+    if hidden:
+        print(c(f"  ({hidden} payload(s) offline masqué(s) — --offline pour tout afficher)", DIM))
 
 def render_vt_crowdsourced_context(data):
     if not data or data.get("_skipped") or data.get("_error"):
@@ -867,7 +884,7 @@ def render_vt_hash_section(data: dict):
     _render_crowdsourced_ids(attr)
     _render_sandbox_verdicts(attr)
 
-def render_details(target, kind, results, years=None, as_json=False):
+def render_details(target, kind, results, years=None, as_json=False, show_offline=False):
     if as_json:
         print(json.dumps({"target": target, "type": kind, "results": results}, indent=2))
         return
@@ -888,7 +905,7 @@ def render_details(target, kind, results, years=None, as_json=False):
     render_vt_crowdsourced_context(results.get("virustotal"))
 
     # ── Hashes URLhaus ──
-    render_urlhaus_hashes(results.get("urlhaus"))
+    render_urlhaus_hashes(results.get("urlhaus"), show_offline=show_offline)
 
     # ── Communicating files VT ──
     comm = results.get("vt_communicating_files", {})
@@ -942,7 +959,25 @@ def render_details(target, kind, results, years=None, as_json=False):
 
 # ── orchestration ──────────────────────────────────────────────────────────────
 
-def run_correlation(target, keys, as_json=False, years=None, cache=None):
+_vt_timestamps: list = []  # sliding window — timestamps des requêtes VT (60s)
+
+def _vt_rate_wait(single_target: bool) -> None:
+    """Attend le temps nécessaire pour respecter le quota VT (4 req/min).
+    single_target=True : gap de 5s entre calls.
+    single_target=False : sliding window strict — attend si 4 reqs dans les 60 dernières secondes."""
+    global _vt_timestamps
+    now = time.time()
+    _vt_timestamps = [t for t in _vt_timestamps if now - t < 60.0]
+    if single_target:
+        gap = max(0.0, 5.0 - (now - _vt_timestamps[-1])) if _vt_timestamps else 0.0
+    else:
+        gap = (60.1 - (now - _vt_timestamps[0])) if len(_vt_timestamps) >= 4 else 0.0
+    if gap > 0:
+        time.sleep(gap)
+    _vt_timestamps.append(time.time())
+
+def run_correlation(target, keys, as_json=False, years=None, cache=None, show_offline=False,
+                    single_target: bool = True):
     """Analyse principale pour une IP ou URL.
     Phase 1 : fetch en parallèle de toutes les sources applicables.
     Phase 1b : si URLhaus ne retourne pas de payloads inline, les récupère URL par URL.
@@ -956,7 +991,7 @@ def run_correlation(target, keys, as_json=False, years=None, cache=None):
             score, signals = score_from_results(results)
             if not as_json:
                 render_summary(target, results, score, signals, cached=True)
-                render_details(target, kind, results, years=years)
+                render_details(target, kind, results, years=years, show_offline=show_offline)
             else:
                 print(json.dumps({**hit, "cached": True}, indent=2))
             return hit
@@ -999,6 +1034,7 @@ def run_correlation(target, keys, as_json=False, years=None, cache=None):
                 results[name] = {"_error": err}
             else:
                 results[name] = data
+    _vt_timestamps.append(time.time())
 
     if errors:
         results["_errors"] = errors
@@ -1023,15 +1059,17 @@ def run_correlation(target, keys, as_json=False, years=None, cache=None):
                 return {}
 
         collected = []
-        seen_sha  = set()
+        seen      = set()
         if targets_urls:
             with ThreadPoolExecutor(max_workers=min(4, len(targets_urls))) as pool:
-                for url_resp in pool.map(_fetch_url_payload, targets_urls):
+                for url_str, url_resp in zip(targets_urls, pool.map(_fetch_url_payload, targets_urls)):
                     for p in (url_resp.get("payloads") or []):
                         sha = p.get("response_sha256") or p.get("sha256") or ""
-                        if sha and sha not in seen_sha:
-                            seen_sha.add(sha)
-                            collected.append(p)
+                        key = (sha, url_str)
+                        if key not in seen:
+                            seen.add(key)
+                            collected.append({**p, "url": url_str,
+                                              "_url_status": url_resp.get("url_status", "")})
         if collected:
             results["urlhaus"]["payloads"] = collected
 
@@ -1049,7 +1087,7 @@ def run_correlation(target, keys, as_json=False, years=None, cache=None):
             ("vt_referrer_files",      f"/ip_addresses/{target}/referrer_files",      "referrer files"),
         ]:
             print(c(f"  Fetch VT {label}...", DIM), end="\r", flush=True)
-            time.sleep(16)  # free tier : 4 req/min
+            _vt_rate_wait(single_target)
             try:
                 items, count = _vt_relationship(rel_path, vt_key)
                 filtered = filter_vt_files(items, years=years, min_malicious=1)
@@ -1062,7 +1100,7 @@ def run_correlation(target, keys, as_json=False, years=None, cache=None):
 
     if not as_json:
         render_summary(target, results, score, signals)
-        render_details(target, kind, results, years=years, as_json=False)
+        render_details(target, kind, results, years=years, as_json=False, show_offline=show_offline)
 
     result = {"target": target, "type": kind, "score": score, "results": results}
 
@@ -1379,7 +1417,7 @@ def _launch_web(keys: dict, cache):
     app.run(host='127.0.0.1', port=port, debug=False)
 
 
-def _run_ip_interactive(keys: dict, years, cache=None):
+def _run_ip_interactive(keys: dict, years, cache=None, show_offline=False):
     """Session interactive IP/URL : appelle _ask_ip_targets_interactive(),
     puis run_correlation() pour chaque cible. Retourne sans action si "retour"."""
     print()
@@ -1400,8 +1438,10 @@ def _run_ip_interactive(keys: dict, years, cache=None):
         print(c(f"  Filtre années VT : {', '.join(str(y) for y in sorted(years))}", DIM))
         print()
     all_results = []
+    single = len(targets) == 1
     for target in targets:
-        r = run_correlation(target, keys, years=years, cache=cache)
+        r = run_correlation(target, keys, years=years, cache=cache, show_offline=show_offline,
+                            single_target=single)
         all_results.append(r)
     if export:
         with open(export, "w") as fh:
@@ -1461,6 +1501,8 @@ def main():
                         help="Mode d'analyse : ip (multi-sources) ou hash (VT + URLhaus)")
     parser.add_argument("--nocache", action="store_true",
                         help="Ignore le cache et force les requêtes API")
+    parser.add_argument("--offline", action="store_true",
+                        help="Affiche aussi les payloads URLhaus offline")
     parser.add_argument("--web", "-w", action="store_true",
                         help="Lance l'interface web locale (127.0.0.1)")
     args = parser.parse_args()
@@ -1554,8 +1596,10 @@ def main():
             print(c(f"  Filtre années VT : {', '.join(str(y) for y in sorted(years))}", DIM))
             print()
         all_results = []
+        single = len(targets) == 1
         for target in targets:
-            r = run_correlation(target, keys, as_json=args.json, years=years, cache=cache)
+            r = run_correlation(target, keys, as_json=args.json, years=years, cache=cache,
+                                show_offline=args.offline, single_target=single)
             all_results.append(r)
         if args.export:
             with open(args.export, "w") as fh:
@@ -1570,7 +1614,8 @@ def main():
                     print(); break
                 if not nxt:
                     break
-                r = run_correlation(nxt, keys, as_json=False, years=years, cache=cache)
+                r = run_correlation(nxt, keys, as_json=False, years=years, cache=cache,
+                                    show_offline=args.offline)
                 all_results.append(r)
                 if args.export:
                     with open(args.export, "w") as fh:
@@ -1604,7 +1649,7 @@ def main():
         if choix == "q":
             print(c("  Au revoir.\n", DIM)); sys.exit(0)
         elif choix == "1":
-            _run_ip_interactive(keys, years, cache)
+            _run_ip_interactive(keys, years, cache, show_offline=args.offline)
             _print_main_menu()
         elif choix == "2":
             _run_hash_interactive(keys, cache)

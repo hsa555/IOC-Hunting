@@ -1,3 +1,7 @@
+## 2026-05-28 (URLhaus & VT)
+- Payloads URLhaus : URL source affichée, badge online/offline, filtre online-only par défaut, `--offline` pour tout afficher
+- VT rate limit : 5s entre calls pour une seule IP, sliding window 60s pour plusieurs IPs
+
 ## 2026-05-28 (refactor & optimisations)
 - `setup.py` : option reset complet (passphrase oubliée) accessible sans passphrase + proposé automatiquement après 3 échecs
 - `config_loader.py` : import crypto lazy, cache settings, `_ENV_MAP` fusionné dans `SERVICES`
