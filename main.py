@@ -116,6 +116,10 @@ def is_domain(s):
 def is_url(s):  return s.startswith("http://") or s.startswith("https://")
 def is_hash(s): return bool(_RE_HASH.match(s))
 
+def is_valid_target(s: str) -> bool:
+    """Retourne True si la chaîne est un type de cible reconnu (IP, URL, domaine ou hash)."""
+    return is_ip(s) or is_url(s) or is_domain(s) or is_hash(s)
+
 def extract_host_from_url(url):
     try:
         return urllib.parse.urlparse(url).hostname or ""
@@ -417,6 +421,20 @@ def fetch_virustotal_hash(h: str, key: str) -> dict:
     if not key:
         return {"_skipped": "no key"}
     return _vt_get_retry(f"/files/{h}", key)
+
+def fetch_crtsh(domain: str, key: str = "") -> dict:
+    """Interroge crt.sh (Certificate Transparency) pour un domaine. Sans clé requise."""
+    url = f"https://crt.sh/?q={urllib.parse.quote(domain, safe='')}&output=json"
+    req = urllib.request.Request(url)
+    req.add_header("User-Agent", "IOCHunting/1.0")
+    req.add_header("Accept", "application/json")
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            return {"certs": json.loads(resp.read().decode())}
+    except urllib.error.HTTPError as e:
+        return {"_error": f"HTTP {e.code}"}
+    except Exception as e:
+        return {"_error": str(e)}
 
 def fetch_malwarebazaar(h: str, key: str = "") -> dict:
     """Interroge MalwareBazaar (abuse.ch) — même clé API qu'URLhaus (auth.abuse.ch)."""
@@ -1080,6 +1098,69 @@ def render_vt_hash_section(data: dict):
     _render_crowdsourced_ids(attr)
     _render_sandbox_verdicts(attr)
 
+def _render_mini_crtsh(data: dict):
+    if not data or data.get("_skipped"): return
+    if data.get("_error"):
+        print(f"  {c('⚠', YELLOW)}  crt.sh : {c(data['_error'], DIM)}"); return
+    certs = data.get("certs") or []
+    if not certs:
+        print(f"  {c('crt.sh', BOLD):<28}  {c('aucun certificat trouvé', DIM)}"); return
+    now    = datetime.datetime.utcnow().isoformat()[:10]
+    active = sum(1 for ct in certs if (ct.get("not_after") or "") >= now)
+    recent = max(certs, key=lambda x: x.get("not_after", ""), default={})
+    issuer = recent.get("issuer_name", "")
+    cn     = next((p.split("=",1)[1] for p in issuer.split(", ") if p.startswith("CN=")), "?")
+    expiry = (recent.get("not_after") or "")[:10]
+    exp_col = RED if expiry < now else GREEN
+    print(f"  {c('crt.sh', BOLD):<28}  {c(len(certs), WHITE)} cert(s)"
+          f"  |  {c(active, GREEN)} actif(s)"
+          f"  |  {c(cn[:28], DIM)}"
+          f"  |  expire {c(expiry, exp_col)}")
+
+def render_crtsh_section(data: dict, domain: str):
+    if not data or data.get("_error"): return
+    certs = data.get("certs") or []
+    if not certs: return
+
+    now    = datetime.datetime.utcnow().isoformat()[:10]
+    active = sum(1 for ct in certs if (ct.get("not_after") or "") >= now)
+    recent = max(certs, key=lambda x: x.get("not_after", ""), default={})
+    issuer = recent.get("issuer_name", "")
+    cn     = next((p.split("=",1)[1] for p in issuer.split(", ") if p.startswith("CN=")), "?")
+    not_before = (recent.get("not_before") or "")[:10]
+    not_after  = (recent.get("not_after")  or "")[:10]
+    expired    = not_after < now if not_after else False
+
+    sep()
+    print(f"  {c('crt.sh — Certificate Transparency', BOLD, WHITE)}"
+          f"  {c(f'({len(certs)} entrée(s)  |  {active} actif(s))', DIM)}\n")
+
+    print(f"  {'Émetteur':<26} {c(cn, WHITE)}")
+    print(f"  {'Valide du':<26} {c(not_before, DIM)} → {c(not_after, RED + BOLD if expired else GREEN)}"
+          + (f"  {c('EXPIRÉ', RED, BOLD)}" if expired else ""))
+
+    # Collecter tous les SANs uniques de tous les certs
+    all_sans: set[str] = set()
+    for ct in certs:
+        for san in (ct.get("name_value") or "").split("\n"):
+            san = san.strip()
+            if san and san.lower() != domain.lower():
+                all_sans.add(san)
+
+    if all_sans:
+        wildcards = sorted(s for s in all_sans if s.startswith("*."))
+        subs      = sorted(s for s in all_sans if not s.startswith("*."))
+        combined  = wildcards + subs
+        print()
+        print(f"  {c('Noms / Sous-domaines détectés', BOLD, WHITE)}"
+              f"  {c(f'({len(all_sans)})', DIM)}\n")
+        for san in combined[:25]:
+            col = YELLOW if san.startswith("*.") else CYAN
+            print(f"    {c('·', DIM)}  {c(san, col)}")
+        if len(combined) > 25:
+            print(c(f"    … {len(combined) - 25} de plus", DIM))
+    print()
+
 def render_googledorks_section(data: dict, target: str):
     if not data:
         return
@@ -1106,6 +1187,7 @@ def render_details(target, kind, results, years=None, as_json=False, show_offlin
     _render_mini_censys(results.get("censys"))
     _render_mini_urlhaus(results.get("urlhaus"))
     _render_mini_greynoise(results.get("greynoise"))
+    _render_mini_crtsh(results.get("crtsh"))
     print()
 
     # ── Services Censys ──
@@ -1113,6 +1195,9 @@ def render_details(target, kind, results, years=None, as_json=False, show_offlin
 
     # ── Crowdsourced Context VT ──
     render_vt_crowdsourced_context(results.get("virustotal"))
+
+    # ── Certificats crt.sh ──
+    render_crtsh_section(results.get("crtsh", {}), target)
 
     # ── Hashes URLhaus ──
     render_urlhaus_hashes(results.get("urlhaus"), show_offline=show_offline)
@@ -1205,9 +1290,12 @@ def run_correlation(target, keys, as_json=False, years=None, cache=None, show_of
         tasks["urlhaus"]    = (fetch_urlhaus_url,    target, keys["urlhaus"])
         if host and is_ip(host):
             tasks["abuseipdb"] = (fetch_abuseipdb, host, keys["abuseipdb"])
+        elif host and is_domain(host):
+            tasks["crtsh"] = (fetch_crtsh, host, "")
     elif kind == "domain":
         tasks["virustotal"] = (fetch_virustotal_domain, target, keys["virustotal"])
         tasks["urlhaus"]    = (fetch_urlhaus_host,       target, keys["urlhaus"])
+        tasks["crtsh"]      = (fetch_crtsh,              target, "")
     else:
         tasks["virustotal"] = (fetch_virustotal_url, target, keys["virustotal"])
 
@@ -1596,6 +1684,9 @@ def _ask_ip_targets_interactive():
                 if all(is_ip(p) or is_url(p) or is_hash(p) or is_domain(p) for p in parts):
                     print(c(f"  Une seule cible par ligne — entre chaque IP / URL / Domaine séparément.", YELLOW))
                     continue
+            if not is_valid_target(line):
+                print(c(f"  Format non reconnu (attendu IP, URL, domaine ou hash) : {line[:50]}", YELLOW))
+                continue
             targets.append(line)
         return targets
 
@@ -1814,6 +1905,13 @@ def main():
     if n_before > len(targets) and not args.json and not args.quiet:
         print(c(f"  {n_before - len(targets)} doublon(s) supprimé(s).", DIM))
 
+    # Filtrage des cibles invalides (ni IP, ni URL, ni domaine, ni hash)
+    invalid = [t for t in targets if not is_valid_target(t)]
+    targets = [t for t in targets if is_valid_target(t)]
+    if invalid and not args.json and not args.quiet:
+        for t in invalid:
+            print(c(f"  Ignoré (format non reconnu) : {t[:60]}", YELLOW))
+
     keys = all_keys()
 
     # Charge le TTL depuis settings.json (sans passphrase) — fallback 24h si absent
@@ -1929,6 +2027,9 @@ def main():
                     print(); break
                 if not nxt:
                     break
+                if not is_valid_target(nxt):
+                    print(c(f"  Format non reconnu (attendu IP, URL, domaine ou hash).", YELLOW))
+                    continue
                 r = run_correlation(nxt, keys, as_json=False, years=years, cache=cache,
                                     show_offline=args.offline)
                 all_results.append(r)
