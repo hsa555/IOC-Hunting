@@ -1,3 +1,13 @@
+## 2026-05-29
+- Support des domaines (evil.com) en plus des IPs et URLs
+- Support IPv6
+- Export CSV avec `--export rapport.csv`
+- Mode silencieux `--quiet` avec code retour basé sur le score (pour scripts/pipelines)
+- Lecture depuis stdin avec `--file -`
+- Déduplication automatique des cibles
+- `update.py` : mise à jour depuis GitHub avec rollback possible
+- Google Dorks demandé une seule fois au début, pas après chaque IP
+
 ## 2026-05-28 (Google Dorks)
 - Nouveau module `modules/googledorks_lookup.py` : recherche Google via SerpAPI (100 req/mois gratuit)
 - Intégré dans `main.py` : prompt "Google Dorks ? (o/N)" après chaque analyse IP interactive
@@ -8,13 +18,12 @@
 - `googledorks_lookup.py` standalone : `python3 modules/googledorks_lookup.py <ip> [--num N] [--json]`
 
 ## 2026-05-28 (URLhaus & VT)
-- Payloads URLhaus : URL source affichée, badge online/offline, filtre online-only par défaut, `--offline` pour tout afficher
-- VT rate limit : 5s entre calls pour une seule IP, sliding window 60s pour plusieurs IPs
+- Payloads URLhaus : badge online/offline, filtre online-only par défaut, `--offline` pour tout afficher
+- VT rate limit : fenêtre glissante pour mieux gérer les listes de plusieurs IPs
 
-## 2026-05-28 (refactor & optimisations)
-- `setup.py` : option reset complet (passphrase oubliée) accessible sans passphrase + proposé automatiquement après 3 échecs
-- `config_loader.py` : import crypto lazy, cache settings, `_ENV_MAP` fusionné dans `SERVICES`
-- Modules : suppressions de doublons et redondances mineures dans `setup.py`, `config_loader.py`, `main.py` et les modules standalone
+## 2026-05-28 (refactor)
+- Reset complet de la config accessible sans passphrase (pratique si passphrase oubliée)
+- Optimisations internes config_loader et suppressions de doublons dans les modules
 
 ## 2026-05-22 (fixes)
 - Passphrase vide (Entrée sans saisir) → arrêt immédiat du script au lieu de continuer sans clés

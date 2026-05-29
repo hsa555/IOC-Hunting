@@ -24,9 +24,9 @@ Outil de threat hunting en ligne de commande qui corrèle automatiquement plusie
 ## Fonctionnalités
 
 - **Deux modes d'analyse** :
-  - **Mode IP/URL** : corrélation multi-sources (AbuseIPDB · VirusTotal · Shodan · Censys · URLhaus)
+  - **Mode IP / URL / Domaine** : corrélation multi-sources (AbuseIPDB · VirusTotal · Shodan · Censys · URLhaus)
   - **Mode Hash** : analyse de fichiers via VirusTotal + URLhaus (MD5, SHA1, SHA256)
-- **Auto-détection** du type de cible passé en argument (IP, URL ou hash)
+- **Auto-détection** du type de cible passé en argument (IPv4, IPv6, URL, domaine ou hash)
 - **Score de menace agrégé** (0–100) avec niveau FAIBLE / MODÉRÉ / ÉLEVÉ / CRITIQUE
 - **Analyse VirusTotal approfondie** :
   - Détections moteurs AV
@@ -43,7 +43,11 @@ Outil de threat hunting en ligne de commande qui corrèle automatiquement plusie
 - **Google Dorks** (`--dorks` / prompt interactif) : recherche Google via SerpAPI des mentions d'une IP sur le web ouvert (forums, listes GitHub, rapports CTI) — résultats triés par pertinence CTI (botnet, malware, phishing, APT…), exclusion automatique des scanners/blacklists connus
 - **Interface web locale** (`--web`) : UI dark-theme dans le navigateur, bind uniquement sur 127.0.0.1, protection CSRF, une carte de résultat par cible, nav cliquable pour multi-cibles, téléchargement JSON
 - **Chiffrement des clés API** : Fernet/AES-128-CBC + PBKDF2-HMAC-SHA256 (480 000 itérations)
-- **Export JSON** du rapport complet
+- **Export JSON et CSV** : `--export rapport.json` ou `--export rapport.csv` (détecté à l'extension)
+- **Mode silencieux** : `--quiet` supprime toute sortie, code retour `1` si score ≥ seuil (`--threshold N`, défaut 40) — idéal pour les scripts et pipelines
+- **Lecture stdin** : `--file -` lit les cibles depuis stdin (`cat targets.txt | python3 main.py --file -`)
+- **Déduplication automatique** des cibles — les doublons dans un fichier ne sont traités qu'une fois
+- **Mise à jour automatique** : `update.py` vérifie et applique les mises à jour depuis GitHub, avec rollback possible
 - **Ctrl+C propre** : message d'arrêt au lieu d'une traceback
 - Scripts standalone par source pour un usage indépendant
 
@@ -95,8 +99,14 @@ python3 main.py d41d8cd98f00b204e9800998ecf8427e
 # Analyser plusieurs cibles (mélange IP/URL accepté)
 python3 main.py 1.2.3.4 5.6.7.8 https://example.com
 
+# Analyser un domaine — auto-détecté
+python3 main.py evil.com
+
 # Depuis un fichier texte (une cible par ligne, # = commentaire)
 python3 main.py --file targets.txt
+
+# Depuis stdin
+cat targets.txt | python3 main.py --file -
 
 # Forcer le mode hash
 python3 main.py --type hash abc123...
@@ -108,8 +118,13 @@ python3 main.py --type ip 1.2.3.4
 python3 main.py 1.2.3.4 --year 2025
 python3 main.py 1.2.3.4 --year 2024,2025
 
-# Exporter le rapport en JSON
+# Exporter le rapport en JSON ou CSV
 python3 main.py 1.2.3.4 --export rapport.json
+python3 main.py 1.2.3.4 --export rapport.csv
+
+# Mode silencieux (code retour 1 si score ≥ 40)
+python3 main.py --quiet 1.2.3.4
+python3 main.py --quiet --threshold 70 1.2.3.4
 
 # Sortie JSON brute (machine-readable)
 python3 main.py 1.2.3.4 --json
@@ -154,7 +169,7 @@ python3 main.py --web
 
 Lance une recherche Google via **SerpAPI** pour trouver les mentions de l'IP sur le web ouvert : forums, listes GitHub, rapports CTI, write-ups, etc.
 
-- **Mode interactif** : après chaque analyse IP, le script propose `Google Dorks ? (o/N)`. Répond `o` pour lancer la recherche.
+- **Mode interactif** : au début d'une session multi-cibles, le script demande une fois `Lancer Google Dorks ?`. Si `o`, les Dorks tournent automatiquement après chaque analyse sans redemander.
 - **Standalone** :
 
 ```bash
@@ -238,13 +253,15 @@ Quand des cibles sont passées en argument, `main.py` les identifie automatiquem
 
 | Format | Détection |
 |--------|-----------|
-| `1.2.3.4` | IP → mode multi-sources |
+| `1.2.3.4` | IPv4 → mode multi-sources |
+| `2001:db8::1` | IPv6 → mode multi-sources |
+| `evil.com` | Domaine → VT + URLhaus |
 | `https://...` | URL → mode multi-sources |
 | 32 hex chars (MD5) | Hash → VT + URLhaus |
 | 40 hex chars (SHA1) | Hash → VT + URLhaus |
 | 64 hex chars (SHA256) | Hash → VT + URLhaus |
 
-Si toutes les cibles sont des hashes, le mode hash est activé automatiquement. Sinon, le mode IP/URL est utilisé.
+Si toutes les cibles sont des hashes, le mode hash est activé automatiquement. Sinon, le mode IP/URL/Domaine est utilisé.
 
 ---
 
@@ -273,6 +290,7 @@ Tous supportent : `--file`, `--json`, `--export`, `--key`.
 IOC Hunting/
 ├── main.py               ← point d'entrée principal (corrélation + hash)
 ├── setup.py              ← configuration et chiffrement des clés API
+├── update.py             ← mise à jour automatique depuis GitHub (avec rollback)
 ├── requirements.txt      ← dépendances Python (pip install -r requirements.txt)
 ├── README.md
 ├── .internal/

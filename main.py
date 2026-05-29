@@ -35,6 +35,9 @@ import re
 import time
 import datetime
 import hashlib
+import socket
+import csv
+import shutil
 import glob
 import urllib.parse
 import urllib.request
@@ -88,11 +91,28 @@ def sep(ch="─", w=72): print(c(ch * w, DIM))
 _RE_HASH = re.compile(r"^[0-9a-fA-F]{32}$|^[0-9a-fA-F]{40}$|^[0-9a-fA-F]{64}$")
 
 def is_ip(s):
+    for af in (socket.AF_INET, socket.AF_INET6):
+        try:
+            socket.inet_pton(af, s)
+            return True
+        except (socket.error, OSError):
+            pass
+    return False
+
+def is_ipv4(s):
     try:
-        parts = s.split(".")
-        return len(parts) == 4 and all(0 <= int(p) <= 255 for p in parts)
-    except Exception:
+        socket.inet_pton(socket.AF_INET, s)
+        return True
+    except (socket.error, OSError):
         return False
+
+_RE_DOMAIN = re.compile(
+    r"^(?:[a-zA-Z0-9](?:[a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$"
+)
+
+def is_domain(s):
+    return bool(_RE_DOMAIN.match(s)) and not is_ip(s) and not is_hash(s)
+
 def is_url(s):  return s.startswith("http://") or s.startswith("https://")
 def is_hash(s): return bool(_RE_HASH.match(s))
 
@@ -216,7 +236,12 @@ def fetch_abuseipdb(ip, key):
 def fetch_virustotal_ip(ip, key):
     if not key:
         return {"_skipped": "no key"}
-    return _vt_get_retry(f"/ip_addresses/{ip}", key)
+    return _vt_get_retry(f"/ip_addresses/{urllib.parse.quote(ip, safe='')}", key)
+
+def fetch_virustotal_domain(domain, key):
+    if not key:
+        return {"_skipped": "no key"}
+    return _vt_get_retry(f"/domains/{urllib.parse.quote(domain, safe='')}", key)
 
 def fetch_virustotal_url(url_target, key):
     if not key:
@@ -999,25 +1024,8 @@ def render_details(target, kind, results, years=None, as_json=False, show_offlin
 
 # ── orchestration ──────────────────────────────────────────────────────────────
 
-_vt_timestamps: list = []  # sliding window — timestamps des requêtes VT (60s)
-
-def _vt_rate_wait(single_target: bool) -> None:
-    """Attend le temps nécessaire pour respecter le quota VT (4 req/min).
-    single_target=True : gap de 5s entre calls.
-    single_target=False : sliding window strict — attend si 4 reqs dans les 60 dernières secondes."""
-    global _vt_timestamps
-    now = time.time()
-    _vt_timestamps = [t for t in _vt_timestamps if now - t < 60.0]
-    if single_target:
-        gap = max(0.0, 5.0 - (now - _vt_timestamps[-1])) if _vt_timestamps else 0.0
-    else:
-        gap = (60.1 - (now - _vt_timestamps[0])) if len(_vt_timestamps) >= 4 else 0.0
-    if gap > 0:
-        time.sleep(gap)
-    _vt_timestamps.append(time.time())
-
 def run_correlation(target, keys, as_json=False, years=None, cache=None, show_offline=False,
-                    single_target: bool = True):
+                    quiet: bool = False):
     """Analyse principale pour une IP ou URL.
     Phase 1 : fetch en parallèle de toutes les sources applicables.
     Phase 1b : si URLhaus ne retourne pas de payloads inline, les récupère URL par URL.
@@ -1029,14 +1037,14 @@ def run_correlation(target, keys, as_json=False, years=None, cache=None, show_of
             kind = hit["type"]
             results = hit["results"]
             score, signals = score_from_results(results)
-            if not as_json:
+            if not as_json and not quiet:
                 render_summary(target, results, score, signals, cached=True)
                 render_details(target, kind, results, years=years, show_offline=show_offline)
-            else:
+            elif as_json:
                 print(json.dumps({**hit, "cached": True}, indent=2))
             return hit
 
-    kind  = "url" if is_url(target) else ("hash" if is_hash(target) else "ip")
+    kind  = "url" if is_url(target) else ("hash" if is_hash(target) else ("domain" if is_domain(target) else "ip"))
     tasks = {}
 
     if kind == "ip":
@@ -1055,6 +1063,9 @@ def run_correlation(target, keys, as_json=False, years=None, cache=None, show_of
                 tasks["shodan"]    = (fetch_shodan,        host, keys["shodan"])
             else:
                 tasks["urlhaus_host"] = (fetch_urlhaus_host, host, keys["urlhaus"])
+    elif kind == "domain":
+        tasks["virustotal"] = (fetch_virustotal_domain, target, keys["virustotal"])
+        tasks["urlhaus"]    = (fetch_urlhaus_host,       target, keys["urlhaus"])
     else:
         tasks["virustotal"] = (fetch_virustotal_url, target, keys["virustotal"])
 
@@ -1074,8 +1085,6 @@ def run_correlation(target, keys, as_json=False, years=None, cache=None, show_of
                 results[name] = {"_error": err}
             else:
                 results[name] = data
-    _vt_timestamps.append(time.time())
-
     if errors:
         results["_errors"] = errors
 
@@ -1123,11 +1132,11 @@ def run_correlation(target, keys, as_json=False, years=None, cache=None, show_of
 
     if kind == "ip" and vt_ok:
         for key_name, rel_path, label in [
-            ("vt_communicating_files", f"/ip_addresses/{target}/communicating_files", "communicating files"),
-            ("vt_referrer_files",      f"/ip_addresses/{target}/referrer_files",      "referrer files"),
+            ("vt_communicating_files", f"/ip_addresses/{urllib.parse.quote(target, safe='')}/communicating_files", "communicating files"),
+            ("vt_referrer_files",      f"/ip_addresses/{urllib.parse.quote(target, safe='')}/referrer_files",      "referrer files"),
         ]:
             print(c(f"  Fetch VT {label}...", DIM), end="\r", flush=True)
-            _vt_rate_wait(single_target)
+            time.sleep(16)
             try:
                 items, count = _vt_relationship(rel_path, vt_key)
                 filtered = filter_vt_files(items, years=years, min_malicious=1)
@@ -1138,7 +1147,7 @@ def run_correlation(target, keys, as_json=False, years=None, cache=None, show_of
 
     score, signals = score_from_results(results)
 
-    if not as_json:
+    if not as_json and not quiet:
         render_summary(target, results, score, signals)
         render_details(target, kind, results, years=years, as_json=False, show_offline=show_offline)
 
@@ -1191,20 +1200,23 @@ def _render_hash_result(h: str, results: dict, score: int, signals: list, cached
 
 # ── hash correlation ───────────────────────────────────────────────────────────
 
-def run_hash_correlation(targets: list, keys: dict, as_json: bool = False, export_path: str = None, cache: dict = None) -> list:
+def run_hash_correlation(targets: list, keys: dict, as_json: bool = False, export_path: str = None, cache: dict = None, quiet: bool = False) -> list:
     """Analyse une liste de hashes (MD5/SHA1/SHA256) via VT + URLhaus en parallèle.
     16s de pause entre chaque hash pour respecter le rate limit VT (4 req/min).
     Retourne la liste de tous les résultats ; exporte en JSON si export_path fourni."""
     all_results = []
+    _n = len(targets)
     for i, h in enumerate(targets):
+        if _n > 1 and not as_json and not quiet:
+            _show_progress(i + 1, _n, h[:20] + ("…" if len(h) > 20 else ""))
         # Vérifie le cache avant toute requête API
         if cache is not None:
             hit = _cache_get(cache, h)
             if hit:
                 score, signals = score_from_hash_results(hit["results"])
-                if not as_json:
+                if not as_json and not quiet:
                     _render_hash_result(h, hit["results"], score, signals, cached=True)
-                else:
+                elif as_json:
                     print(json.dumps({**hit, "cached": True}, indent=2))
                 all_results.append(hit)
                 continue  # passe au hash suivant sans dormir
@@ -1235,9 +1247,9 @@ def run_hash_correlation(targets: list, keys: dict, as_json: bool = False, expor
 
         score, signals = score_from_hash_results(results)
 
-        if not as_json:
+        if not as_json and not quiet:
             _render_hash_result(h, results, score, signals, cached=False)
-        else:
+        elif as_json:
             print(json.dumps({"target": h, "type": "hash", "score": score, "results": results}, indent=2))
 
         result = {"target": h, "type": "hash", "score": score, "results": results}
@@ -1249,12 +1261,87 @@ def run_hash_correlation(targets: list, keys: dict, as_json: bool = False, expor
 
         all_results.append(result)
 
+    if _n > 1 and not as_json and not quiet:
+        _clear_progress()
+
     if export_path:
         with open(export_path, "w") as fh:
             json.dump(all_results, fh, indent=2)
-        print(c(f"\n  Rapport exporté → {export_path}", GREEN))
+        if not quiet:
+            print(c(f"\n  Rapport exporté → {export_path}", GREEN))
 
     return all_results
+
+# ── barre de progression ───────────────────────────────────────────────────────
+
+def _show_progress(current: int, total: int, label: str):
+    """Affiche une barre de progression collée en bas du terminal visible.
+    Utilise save/restore cursor pour ne pas perturber la sortie normale."""
+    try:
+        size   = shutil.get_terminal_size()
+        cols   = size.columns
+        rows   = size.lines
+        bar_w  = 20
+        filled = int(bar_w * current / total)
+        bar    = ("\033[96m" + "█" * filled
+                  + "\033[0m\033[2m" + "░" * (bar_w - filled) + "\033[0m")
+        prefix = f"  [{current}/{total}]  "
+        max_lbl = max(0, cols - len(prefix) - bar_w - 4)
+        lbl  = label[:max_lbl] if max_lbl else ""
+        line = f"\033[2m{prefix}\033[0m{bar}\033[2m  {lbl}\033[0m"
+        sys.stdout.write(f"\033[s\033[{rows};0H\033[K{line}\033[u")
+        sys.stdout.flush()
+    except Exception:
+        pass
+
+def _clear_progress():
+    """Efface la barre de progression."""
+    try:
+        rows = shutil.get_terminal_size().lines
+        sys.stdout.write(f"\033[s\033[{rows};0H\033[K\033[u")
+        sys.stdout.flush()
+    except Exception:
+        pass
+
+# ── helpers export ─────────────────────────────────────────────────────────────
+
+def _threat_level_plain(score: int) -> str:
+    if score >= 70: return "CRITIQUE"
+    if score >= 40: return "ÉLEVÉ"
+    if score >= 15: return "MODÉRÉ"
+    return "FAIBLE"
+
+def _export_csv(all_results: list, path: str):
+    with open(path, "w", newline="", encoding="utf-8") as fh:
+        writer = csv.writer(fh)
+        writer.writerow([
+            "target", "type", "score", "level",
+            "vt_malicious", "vt_suspicious",
+            "abuseipdb_score", "urlhaus_status", "shodan_cves",
+        ])
+        for r in all_results:
+            res    = r.get("results", {})
+            score  = r.get("score", 0)
+            stats  = (res.get("virustotal", {})
+                        .get("data", {})
+                        .get("attributes", {})
+                        .get("last_analysis_stats", {}))
+            shodan = res.get("shodan", {})
+            cves   = (len(shodan.get("vulns") or [])
+                      if shodan and not shodan.get("_skipped") and not shodan.get("_error") else "")
+            writer.writerow([
+                r.get("target", ""),
+                r.get("type", ""),
+                score,
+                _threat_level_plain(score),
+                stats.get("malicious", ""),
+                stats.get("suspicious", ""),
+                (res.get("abuseipdb", {})
+                    .get("data", {})
+                    .get("abuseConfidenceScore", "")),
+                res.get("urlhaus", {}).get("query_status", ""),
+                cves,
+            ])
 
 # ── helpers menu interactif ────────────────────────────────────────────────────
 
@@ -1302,7 +1389,7 @@ def _ask_ip_targets_interactive():
     Option 2 : fichier texte ou répertoire (toutes les lignes qui ressemblent à une IP ou URL).
     Option r : retour → retourne None (sentinel "retour au menu principal").
     Retourne [] si rien de valide trouvé (pas None — None = retour explicite)."""
-    print(c("  1  Saisie directe de l'IP / URL", WHITE))
+    print(c("  1  Saisie directe de l'IP / URL / Domaine", WHITE))
     print(c("  2  Charger depuis un fichier ou répertoire", WHITE))
     print(c("  r  Retour au menu principal", WHITE))
     method = input(c("  Choix › ", CYAN)).strip().lower()
@@ -1342,18 +1429,18 @@ def _ask_ip_targets_interactive():
                 print(c(f"  Erreur de lecture : {e}", RED))
                 return []
 
-        targets = [l for l in raw if is_ip(l) or is_url(l)]
+        targets = [l for l in raw if is_ip(l) or is_url(l) or is_domain(l)]
         skipped = len(raw) - len(targets)
         if skipped:
-            print(c(f"  {skipped} ligne(s) ignorée(s) (ni IP ni URL valide).", YELLOW))
+            print(c(f"  {skipped} ligne(s) ignorée(s) (ni IP, domaine ni URL valide).", YELLOW))
         if not targets:
-            print(c("  Aucune IP / URL valide trouvée.", RED))
+            print(c("  Aucune IP / domaine / URL valide trouvée.", RED))
             return []
         print(c(f"  {len(targets)} cible(s) chargée(s).", GREEN))
         return targets
 
     else:
-        print(c("  Entre les IPs / URLs une par ligne. Ligne vide pour terminer.", DIM))
+        print(c("  Entre les IPs / URLs / Domaines une par ligne. Ligne vide pour terminer.", DIM))
         targets = []
         while True:
             line = input(c("  › ", DIM)).strip()
@@ -1361,8 +1448,8 @@ def _ask_ip_targets_interactive():
                 break
             if ' ' in line:
                 parts = line.split()
-                if all(is_ip(p) or is_url(p) or is_hash(p) for p in parts):
-                    print(c(f"  Une seule cible par ligne — entre chaque IP / URL séparément.", YELLOW))
+                if all(is_ip(p) or is_url(p) or is_hash(p) or is_domain(p) for p in parts):
+                    print(c(f"  Une seule cible par ligne — entre chaque IP / URL / Domaine séparément.", YELLOW))
                     continue
             targets.append(line)
         return targets
@@ -1477,23 +1564,23 @@ def _run_ip_interactive(keys: dict, years, cache=None, show_offline=False):
     if years:
         print(c(f"  Filtre années VT : {', '.join(str(y) for y in sorted(years))}", DIM))
         print()
+    serpapi_key = keys.get("serpapi", "")
+    use_dorks = False
+    if serpapi_key:
+        try:
+            dorks_ans = input(c("  Lancer Google Dorks pour chaque cible ? (o/N) › ", DIM)).strip().lower()
+        except EOFError:
+            dorks_ans = "n"
+        use_dorks = (dorks_ans == "o")
     all_results = []
-    single = len(targets) == 1
     for target in targets:
-        r = run_correlation(target, keys, years=years, cache=cache, show_offline=show_offline,
-                            single_target=single)
+        r = run_correlation(target, keys, years=years, cache=cache, show_offline=show_offline)
         all_results.append(r)
-        serpapi_key = keys.get("serpapi", "")
-        if serpapi_key:
-            try:
-                dorks_ans = input(c("  Google Dorks ? (o/N)  ", DIM) + c("déconseillé sur grosse liste d'IPs", YELLOW) + c(" › ", DIM)).strip().lower()
-            except EOFError:
-                dorks_ans = "n"
-            if dorks_ans == "o":
-                print(c("  Recherche Google Dorks...", DIM), end="\r", flush=True)
-                gd_data = fetch_googledorks(target, serpapi_key)
-                print(" " * 40, end="\r")
-                render_googledorks_section(gd_data, target)
+        if use_dorks:
+            print(c("  Recherche Google Dorks...", DIM), end="\r", flush=True)
+            gd_data = fetch_googledorks(target, serpapi_key)
+            print(" " * 40, end="\r")
+            render_googledorks_section(gd_data, target)
     if export:
         with open(export, "w") as fh:
             json.dump(all_results, fh, indent=2)
@@ -1544,9 +1631,9 @@ def main():
         description="IOC Hunting — corrélation multi-sources (IP/URL ou Hash)",
     )
     parser.add_argument("targets", nargs="*", help="IPs, URLs ou hashes")
-    parser.add_argument("--file",   "-f",  help="Fichier de cibles (une par ligne)")
+    parser.add_argument("--file",   "-f",  help="Fichier de cibles (une par ligne) ; - pour stdin")
     parser.add_argument("--json",          action="store_true", help="Sortie JSON brute")
-    parser.add_argument("--export", "-e",  help="Exporter rapport JSON")
+    parser.add_argument("--export", "-e",  help="Exporter rapport (JSON ou CSV selon l'extension .csv)")
     parser.add_argument("--year",   "-y",  help="Filtrer VT files par année(s) ex: 2025  ou  2024,2025")
     parser.add_argument("--type",    "-t",  choices=["ip", "hash"],
                         help="Mode d'analyse : ip (multi-sources) ou hash (VT + URLhaus)")
@@ -1554,6 +1641,10 @@ def main():
                         help="Ignore le cache et force les requêtes API")
     parser.add_argument("--offline", action="store_true",
                         help="Affiche aussi les payloads URLhaus offline")
+    parser.add_argument("--quiet",   "-q", action="store_true",
+                        help="Supprime toute sortie. Code retour 1 si score ≥ seuil (--threshold).")
+    parser.add_argument("--threshold",     type=int, default=40, metavar="N",
+                        help="Seuil de score pour --quiet (défaut: 40)")
     parser.add_argument("--web", "-w", action="store_true",
                         help="Lance l'interface web locale (127.0.0.1)")
     args = parser.parse_args()
@@ -1562,12 +1653,21 @@ def main():
 
     targets = list(args.targets)
     if args.file:
-        try:
-            with open(args.file) as fh:
-                targets += [l.strip() for l in fh if l.strip() and not l.startswith("#")]
-        except FileNotFoundError:
-            print(c(f"Fichier introuvable : {args.file}", RED), file=sys.stderr)
-            sys.exit(1)
+        if args.file == "-":
+            targets += [l.strip() for l in sys.stdin if l.strip() and not l.startswith("#")]
+        else:
+            try:
+                with open(args.file) as fh:
+                    targets += [l.strip() for l in fh if l.strip() and not l.startswith("#")]
+            except FileNotFoundError:
+                print(c(f"Fichier introuvable : {args.file}", RED), file=sys.stderr)
+                sys.exit(1)
+
+    # Déduplication — préserve l'ordre d'apparition
+    n_before = len(targets)
+    targets  = list(dict.fromkeys(targets))
+    if n_before > len(targets) and not args.json and not args.quiet:
+        print(c(f"  {n_before - len(targets)} doublon(s) supprimé(s).", DIM))
 
     keys = all_keys()
 
@@ -1613,54 +1713,73 @@ def main():
             if not h:
                 sys.exit(0)
             targets = [h]
-        if not args.json:
+        if not args.json and not args.quiet:
             n = len(targets)
             label = f"{n} hash{'es' if n > 1 else ''} détecté{'s' if n > 1 else ''}"
             print(c(f"\n  {label}  →  VirusTotal · URLhaus\n", DIM))
         missing = [s for s, k in keys.items() if not k and s in ("virustotal", "urlhaus")]
-        if missing and not args.json:
+        if missing and not args.json and not args.quiet:
             print(c(f"  Clés manquantes : {', '.join(missing)}", YELLOW))
             print(f"  Lance {c('python setup.py', CYAN)} pour les configurer.\n")
-        run_hash_correlation(targets, keys, as_json=args.json, export_path=args.export, cache=cache)
+        json_export = args.export if args.export and not args.export.lower().endswith(".csv") else None
+        all_results = run_hash_correlation(targets, keys, as_json=args.json,
+                                           export_path=json_export, cache=cache, quiet=args.quiet)
+        if args.export and args.export.lower().endswith(".csv"):
+            _export_csv(all_results, args.export)
+            if not args.quiet:
+                print(c(f"  Rapport CSV exporté → {args.export}", GREEN))
+        if args.quiet:
+            sys.exit(1 if any(r.get("score", 0) >= args.threshold for r in all_results) else 0)
         return
 
-    # ── Mode IP/URL avec cibles fournies ────────────────────────────────────
+    # ── Mode IP/URL/Domaine avec cibles fournies ─────────────────────────────
     if targets:
-        if not args.json:
+        if not args.json and not args.quiet:
             def _kind_label(t):
-                if is_hash(t):  return "Hash"
-                if is_url(t):   return "URL"
+                if is_hash(t):    return "Hash"
+                if is_url(t):     return "URL"
+                if is_domain(t):  return "Domaine"
                 return "IP"
-            kinds = sorted({_kind_label(t) for t in targets})
-            n     = len(targets)
+            kinds   = sorted({_kind_label(t) for t in targets})
+            n       = len(targets)
             kinds_s = "/".join(kinds)
             count_s = f"{n} cible{'s' if n > 1 else ''}" if n > 1 else targets[0]
             sources = "AbuseIPDB · VT · Shodan · Censys · URLhaus"
-            print(c(f"\n  {kinds_s} détecté{'e' if 'IP' in kinds or 'URL' in kinds else ''}"
+            print(c(f"\n  {kinds_s} détecté{'e' if any(k in kinds for k in ('IP', 'URL', 'Domaine')) else ''}"
                     f"{'' if n == 1 else f' ({count_s})'}  →  {sources}\n", DIM))
         missing = [svc for svc, k in keys.items() if not k]
-        if missing and not args.json:
+        if missing and not args.json and not args.quiet:
             print()
             print(c(f"  Clés manquantes : {', '.join(missing)}", YELLOW))
             print(f"  Lance {c('python setup.py', CYAN)} pour les configurer.\n")
-        if years and not args.json:
+        if years and not args.json and not args.quiet:
             print(c(f"  Filtre années VT : {', '.join(str(y) for y in sorted(years))}", DIM))
             print()
         all_results = []
-        single = len(targets) == 1
-        for target in targets:
+        _n = len(targets)
+        for _i, target in enumerate(targets):
+            if _n > 1 and not args.json and not args.quiet:
+                _show_progress(_i + 1, _n, target)
             r = run_correlation(target, keys, as_json=args.json, years=years, cache=cache,
-                                show_offline=args.offline, single_target=single)
+                                show_offline=args.offline, quiet=args.quiet)
             all_results.append(r)
+        if _n > 1 and not args.json and not args.quiet:
+            _clear_progress()
         if args.export:
-            with open(args.export, "w") as fh:
-                json.dump(all_results, fh, indent=2)
-            print(c(f"  Rapport exporté → {args.export}", GREEN))
-        if not args.json:
+            if args.export.lower().endswith(".csv"):
+                _export_csv(all_results, args.export)
+                if not args.quiet:
+                    print(c(f"  Rapport CSV exporté → {args.export}", GREEN))
+            else:
+                with open(args.export, "w") as fh:
+                    json.dump(all_results, fh, indent=2)
+                if not args.quiet:
+                    print(c(f"  Rapport exporté → {args.export}", GREEN))
+        if not args.json and not args.quiet:
             while True:
                 print()
                 try:
-                    nxt = input(c("  Analyser une autre cible ? (IP / URL / hash  ou  Entrée pour quitter) › ", DIM)).strip()
+                    nxt = input(c("  Analyser une autre cible ? (IP / URL / Domaine / hash  ou  Entrée pour quitter) › ", DIM)).strip()
                 except EOFError:
                     print(); break
                 if not nxt:
@@ -1669,9 +1788,15 @@ def main():
                                     show_offline=args.offline)
                 all_results.append(r)
                 if args.export:
-                    with open(args.export, "w") as fh:
-                        json.dump(all_results, fh, indent=2)
-                    print(c(f"  Rapport mis à jour → {args.export}", GREEN))
+                    if args.export.lower().endswith(".csv"):
+                        _export_csv(all_results, args.export)
+                        print(c(f"  Rapport CSV mis à jour → {args.export}", GREEN))
+                    else:
+                        with open(args.export, "w") as fh:
+                            json.dump(all_results, fh, indent=2)
+                        print(c(f"  Rapport mis à jour → {args.export}", GREEN))
+        if args.quiet:
+            sys.exit(1 if any(r.get("score", 0) >= args.threshold for r in all_results) else 0)
         return
 
     # ── Menu interactif (aucune cible, aucun --type) ─────────────────────────
@@ -1681,7 +1806,7 @@ def main():
         print(c("  ║  ", CYAN) + c("IOC Hunting", BOLD, WHITE) + c(" — Choix du mode d'analyse         ║", CYAN))
         print(c("  ╚═════════════════════════════════════════════════════╝", CYAN))
         print()
-        print(f"  {c('1', BOLD)}  Analyser une IP / URL   "
+        print(f"  {c('1', BOLD)}  Analyser une IP / URL / Domaine   "
               f"{c('(AbuseIPDB · VT · Shodan · Censys · URLhaus)', DIM)}")
         print(f"  {c('2', BOLD)}  Analyser un hash         "
               f"{c('(VirusTotal · URLhaus)', DIM)}")
