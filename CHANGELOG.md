@@ -7,6 +7,10 @@
 - Déduplication automatique des cibles
 - `update.py` : mise à jour depuis GitHub avec rollback possible
 - Google Dorks demandé une seule fois au début, pas après chaque IP
+- GreyNoise : détecte si une IP scanne internet (scanner légitime, malveillant, service connu) — sans clé requise
+- MalwareBazaar : famille, tags comportementaux, méthode de livraison et vendor intel sur les hashes — même clé qu'URLhaus
+- Barre de progression en bas du terminal lors de l'analyse de listes
+- URLs scannées via VT + URLhaus + AbuseIPDB sur l'IP du host si applicable
 
 ## 2026-05-28 (Google Dorks)
 - Nouveau module `modules/googledorks_lookup.py` : recherche Google via SerpAPI (100 req/mois gratuit)

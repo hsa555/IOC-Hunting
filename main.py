@@ -243,6 +243,25 @@ def fetch_virustotal_domain(domain, key):
         return {"_skipped": "no key"}
     return _vt_get_retry(f"/domains/{urllib.parse.quote(domain, safe='')}", key)
 
+def fetch_greynoise(ip, key):
+    req = urllib.request.Request(
+        f"https://api.greynoise.io/v3/community/{urllib.parse.quote(ip, safe='')}"
+    )
+    if key:
+        req.add_header("key", key)
+    req.add_header("Accept", "application/json")
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            return json.loads(resp.read().decode())
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            return {"noise": False, "riot": False, "_not_seen": True}
+        if e.code == 429:
+            return {"_error": "quota atteint"}
+        if e.code == 401:
+            return {"_skipped": "no key"}
+        raise
+
 def fetch_virustotal_url(url_target, key):
     if not key:
         return {"_skipped": "no key"}
@@ -399,6 +418,17 @@ def fetch_virustotal_hash(h: str, key: str) -> dict:
         return {"_skipped": "no key"}
     return _vt_get_retry(f"/files/{h}", key)
 
+def fetch_malwarebazaar(h: str, key: str = "") -> dict:
+    """Interroge MalwareBazaar (abuse.ch) — même clé API qu'URLhaus (auth.abuse.ch)."""
+    if not key:
+        return {"_skipped": "no key"}
+    data = urllib.parse.urlencode({"query": "get_info", "hash": h}).encode()
+    req  = urllib.request.Request("https://mb-api.abuse.ch/api/v1/", data=data, method="POST")
+    req.add_header("Content-Type", "application/x-www-form-urlencoded")
+    req.add_header("Auth-Key", key)
+    with urllib.request.urlopen(req, timeout=12) as resp:
+        return json.loads(resp.read().decode())
+
 def fetch_urlhaus_hash(h: str, key: str) -> dict:
     """Interroge URLhaus /v1/payload/ pour un hash.
     Le champ envoyé dépend de la longueur : sha256_hash (64 chars) ou md5_hash (32)."""
@@ -470,6 +500,11 @@ def score_from_results(results):
         elif qs not in ("no_results", "is_clean", ""):
             score += 10; signals.append(c("URLhaus référencé (offline)", YELLOW))
 
+    gn = results.get("greynoise", {})
+    if gn and not gn.get("_skipped") and not gn.get("_error") and not gn.get("_not_seen"):
+        if gn.get("noise") and gn.get("classification") == "malicious":
+            score += 15; signals.append(c("GreyNoise scanner malveillant", RED))
+
     return min(score, 100), signals
 
 def threat_level(score):
@@ -533,6 +568,18 @@ def score_from_hash_results(results: dict) -> tuple:
                 signals.append(c("URLhaus référencé (offline)", YELLOW))
             if sig:
                 signals.append(c(f"Famille: {sig}", RED))
+
+    mb = results.get("malwarebazaar", {})
+    if mb and mb.get("query_status") == "ok":
+        entry    = (mb.get("data") or [{}])[0]
+        mb_sig   = entry.get("signature") or ""
+        mb_tags  = entry.get("tags") or []
+        if mb_sig and not any("Famille" in str(s) for s in signals):
+            signals.append(c(f"MalwareBazaar: {mb_sig}", RED))
+        bad = [t for t in mb_tags if t in ("stealer","loader","dropper","ransomware","rat","backdoor","keylogger","spyware")]
+        if bad:
+            score += 5
+            signals.append(c(f"Tags: {', '.join(bad[:3])}", YELLOW))
 
     return min(score, 100), signals
 
@@ -677,6 +724,33 @@ def _render_mini_censys(data):
     if ports:
         print(f"  {'':<28}  " + "  ".join(c(str(p), YELLOW) for p in ports[:20]))
 
+def _render_mini_greynoise(data):
+    if not data or data.get("_skipped"): return
+    if data.get("_error"):
+        print(f"  {c('⚠', YELLOW)}  GreyNoise : {c(data['_error'], DIM)}"); return
+    if data.get("_not_seen"):
+        print(f"  {c('GreyNoise', BOLD):<28}  {c('IP non référencée', DIM)}"); return
+
+    riot    = data.get("riot", False)
+    noise   = data.get("noise", False)
+    classif = data.get("classification", "unknown")
+    name    = (data.get("name") or "").strip()
+    last    = (data.get("last_seen") or "")[:10]
+
+    name_s = f"  |  {c(name, WHITE)}" if name and name != "unknown" else ""
+    date_s = f"  |  vu {c(last, DIM)}" if last else ""
+
+    if riot:
+        print(f"  {c('GreyNoise', BOLD):<28}  {c('service connu ✓', GREEN)}{name_s}")
+    elif noise and classif == "malicious":
+        print(f"  {c('GreyNoise', BOLD):<28}  {c('scanner malveillant', RED + BOLD)}{name_s}{date_s}")
+    elif noise and classif == "benign":
+        print(f"  {c('GreyNoise', BOLD):<28}  {c('scanner légitime', DIM)}{name_s}{date_s}")
+    elif noise:
+        print(f"  {c('GreyNoise', BOLD):<28}  {c('scan internet (non classifié)', YELLOW)}{name_s}{date_s}")
+    else:
+        print(f"  {c('GreyNoise', BOLD):<28}  {c('pas de scan internet détecté', DIM)}")
+
 def render_censys_services(data):
     if not data or data.get("_skipped") or data.get("_not_found") or data.get("_error"):
         return
@@ -754,6 +828,76 @@ def render_urlhaus_hashes(data, show_offline=False):
         print()
     if hidden:
         print(c(f"  ({hidden} payload(s) offline masqué(s) — --offline pour tout afficher)", DIM))
+
+def _render_mini_malwarebazaar(data: dict):
+    if not data or data.get("_error"): return
+    if data.get("query_status") != "ok":
+        print(f"  {c('MalwareBazaar', BOLD):<28}  {c('hash non référencé', GREEN)}"); return
+    entry  = (data.get("data") or [{}])[0]
+    sig    = entry.get("signature") or "?"
+    ftype  = entry.get("file_type") or "?"
+    tags   = entry.get("tags") or []
+    tags_s = "  " + "  ".join(c(f"[{t}]", CYAN) for t in tags[:4]) if tags else ""
+    print(f"  {c('MalwareBazaar', BOLD):<28}  {c('TROUVÉ', RED + BOLD)}  |  {c(sig, RED)}  |  {c(ftype, YELLOW)}{tags_s}")
+
+def render_malwarebazaar_section(data: dict):
+    if not data or data.get("_error"): return
+    if data.get("query_status") != "ok": return
+    entry    = (data.get("data") or [{}])[0]
+    sig      = entry.get("signature") or "inconnu"
+    ftype    = entry.get("file_type") or "?"
+    mime     = entry.get("file_type_mime") or ""
+    size     = entry.get("file_size")
+    fname    = entry.get("file_name") or ""
+    first    = (entry.get("first_seen") or "")[:10]
+    last     = (entry.get("last_seen") or "")[:10]
+    tags     = entry.get("tags") or []
+    delivery = entry.get("delivery_method") or ""
+    reporter = entry.get("reporter") or ""
+    country  = entry.get("origin_country") or ""
+    vendor   = entry.get("vendor_intel") or {}
+    intel    = entry.get("intelligence") or {}
+    sep()
+    print(f"  {c('MalwareBazaar', BOLD, WHITE)}\n")
+    print(f"  {'Famille':<26} {c(sig, RED, BOLD)}")
+    print(f"  {'Type':<26} {c(ftype, YELLOW)}" + (f"  {c(mime, DIM)}" if mime else ""))
+    if size:
+        print(f"  {'Taille':<26} {c(str(size) + ' bytes', DIM)}")
+    if fname:
+        print(f"  {'Fichier':<26} {c(fname, WHITE)}")
+    if first:
+        print(f"  {'Première observation':<26} {c(first, DIM)}")
+    if last:
+        print(f"  {'Dernière observation':<26} {c(last, DIM)}")
+    if delivery and delivery != "unknown":
+        col = RED if delivery == "email" else YELLOW
+        print(f"  {'Méthode de livraison':<26} {c(delivery, col, BOLD)}")
+    if reporter:
+        country_s = f"  {c(f'({country})', DIM)}" if country else ""
+        print(f"  {'Reporter':<26} {c(reporter, DIM)}{country_s}")
+    dl = str(intel.get("downloads") or "")
+    if dl and dl != "0":
+        print(f"  {'Téléchargements':<26} {c(dl, DIM)}")
+    if tags:
+        print(f"  {'Tags':<26} " + "  ".join(c(f"[{t}]", CYAN) for t in tags))
+    if vendor:
+        print()
+        print(f"  {c('Vendor Intel', BOLD, WHITE)}  {c(f'({len(vendor)} source(s))', DIM)}\n")
+        for vname, vdata in list(vendor.items())[:6]:
+            if isinstance(vdata, str):
+                det = vdata
+            elif isinstance(vdata, list):
+                first = vdata[0] if vdata else {}
+                det = (first.get("malware_family") or first.get("verdict")
+                       or first.get("result") or "?") if isinstance(first, dict) else "?"
+            elif isinstance(vdata, dict):
+                det = (vdata.get("detection") or vdata.get("verdict")
+                       or vdata.get("malware_family") or vdata.get("result") or "?")
+            else:
+                det = "?"
+            if det and det != "?":
+                print(f"    {c('·', DIM)}  {c(vname, WHITE):<22}  {c(det, YELLOW)}")
+    print()
 
 def render_vt_crowdsourced_context(data):
     if not data or data.get("_skipped") or data.get("_error"):
@@ -961,6 +1105,7 @@ def render_details(target, kind, results, years=None, as_json=False, show_offlin
     _render_mini_shodan(results.get("shodan"))
     _render_mini_censys(results.get("censys"))
     _render_mini_urlhaus(results.get("urlhaus"))
+    _render_mini_greynoise(results.get("greynoise"))
     print()
 
     # ── Services Censys ──
@@ -1053,16 +1198,13 @@ def run_correlation(target, keys, as_json=False, years=None, cache=None, show_of
         tasks["shodan"]     = (fetch_shodan,         target, keys["shodan"])
         tasks["censys"]     = (fetch_censys,         target, keys["censys"])
         tasks["urlhaus"]    = (fetch_urlhaus_host,   target, keys["urlhaus"])
+        tasks["greynoise"]  = (fetch_greynoise,      target, keys.get("greynoise", ""))
     elif kind == "url":
         host = extract_host_from_url(target)
-        tasks["urlhaus"]    = (fetch_urlhaus_url,    target, keys["urlhaus"])
         tasks["virustotal"] = (fetch_virustotal_url, target, keys["virustotal"])
-        if host:
-            if is_ip(host):
-                tasks["abuseipdb"] = (fetch_abuseipdb,    host, keys["abuseipdb"])
-                tasks["shodan"]    = (fetch_shodan,        host, keys["shodan"])
-            else:
-                tasks["urlhaus_host"] = (fetch_urlhaus_host, host, keys["urlhaus"])
+        tasks["urlhaus"]    = (fetch_urlhaus_url,    target, keys["urlhaus"])
+        if host and is_ip(host):
+            tasks["abuseipdb"] = (fetch_abuseipdb, host, keys["abuseipdb"])
     elif kind == "domain":
         tasks["virustotal"] = (fetch_virustotal_domain, target, keys["virustotal"])
         tasks["urlhaus"]    = (fetch_urlhaus_host,       target, keys["urlhaus"])
@@ -1181,7 +1323,9 @@ def _render_hash_result(h: str, results: dict, score: int, signals: list, cached
     print(f"  {c('Détails par source', BOLD)}\n")
     _render_mini_vt_hash(results.get("virustotal"))
     _render_mini_urlhaus_hash(results.get("urlhaus"))
+    _render_mini_malwarebazaar(results.get("malwarebazaar"))
     print()
+    render_malwarebazaar_section(results.get("malwarebazaar", {}))
     render_urlhaus_hash_section(results.get("urlhaus", {}))
     render_vt_hash_section(results.get("virustotal", {}))
     if not cached:
@@ -1227,10 +1371,11 @@ def run_hash_correlation(targets: list, keys: dict, as_json: bool = False, expor
         results = {}
         errors  = {}
         tasks   = {
-            "virustotal": (fetch_virustotal_hash, h, keys["virustotal"]),
-            "urlhaus":    (fetch_urlhaus_hash,    h, keys["urlhaus"]),
+            "virustotal":    (fetch_virustotal_hash, h, keys["virustotal"]),
+            "urlhaus":       (fetch_urlhaus_hash,    h, keys["urlhaus"]),
+            "malwarebazaar": (fetch_malwarebazaar,   h, keys["urlhaus"]),
         }
-        with ThreadPoolExecutor(max_workers=2) as pool:
+        with ThreadPoolExecutor(max_workers=3) as pool:
             futures = {
                 pool.submit(safe_fetch, name, fn, *args): name
                 for name, (fn, *args) in tasks.items()

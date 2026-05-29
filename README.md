@@ -24,8 +24,8 @@ Outil de threat hunting en ligne de commande qui corrèle automatiquement plusie
 ## Fonctionnalités
 
 - **Deux modes d'analyse** :
-  - **Mode IP / URL / Domaine** : corrélation multi-sources (AbuseIPDB · VirusTotal · Shodan · Censys · URLhaus)
-  - **Mode Hash** : analyse de fichiers via VirusTotal + URLhaus (MD5, SHA1, SHA256)
+  - **Mode IP / URL / Domaine** : corrélation multi-sources (AbuseIPDB · VirusTotal · Shodan · Censys · URLhaus · GreyNoise)
+  - **Mode Hash** : analyse de fichiers via VirusTotal + URLhaus + MalwareBazaar (MD5, SHA1, SHA256)
 - **Auto-détection** du type de cible passé en argument (IPv4, IPv6, URL, domaine ou hash)
 - **Score de menace agrégé** (0–100) avec niveau FAIBLE / MODÉRÉ / ÉLEVÉ / CRITIQUE
 - **Analyse VirusTotal approfondie** :
@@ -37,6 +37,9 @@ Outil de threat hunting en ligne de commande qui corrèle automatiquement plusie
   - Crowdsourced Context
   - Communicating Files & Referrer Files (mode IP)
 - **Ports ouverts et services** via Shodan (fallback InternetDB sans clé) et Censys
+- **GreyNoise** : détecte si une IP scanne activement internet — sans clé requise (plan communautaire)
+- **MalwareBazaar** : famille malware, tags comportementaux (`stealer`, `loader`, `ransomware`...), méthode de livraison et vendor intel sur les hashes — même clé qu'URLhaus
+- **Barre de progression** en bas du terminal lors de l'analyse de listes de cibles
 - **Hachage local de fichiers** : calcule le SHA256 de fichiers/répertoires locaux, puis les interroge
 - **Scan de répertoire** : si un répertoire est fourni à la place d'un fichier, tous les fichiers sont traités
 - **Cache des résultats** : évite de reconsommer du quota API — durée configurable via `setup.py` (24h par défaut), purgé automatiquement au lancement. Option `--nocache` pour forcer des requêtes fraîches
@@ -77,8 +80,11 @@ python3 setup.py
 | Censys | Ports ouverts, services détaillés | Oui | https://app.censys.io/user/tokens |
 | URLhaus | URLs malveillantes, hashes malwares | Oui | https://auth.abuse.ch/ |
 | SerpAPI | Google Dorks — mentions web (forums, GitHub, rapports CTI) | Optionnelle | https://serpapi.com/ |
+| GreyNoise | Scan internet — scanner légitime, malveillant ou trafic ciblé | Aucune* | https://www.greynoise.io/ |
+| MalwareBazaar | Famille, tags, vendor intel sur les hashes | Même clé qu'URLhaus | https://auth.abuse.ch/ |
 
 *Sans clé Shodan, l'outil utilise automatiquement **Shodan InternetDB** (gratuit, sans clé, ports/vulns/hostnames).
+*GreyNoise fonctionne sans clé via l'endpoint communautaire public.
 
 ---
 
@@ -253,10 +259,10 @@ Quand des cibles sont passées en argument, `main.py` les identifie automatiquem
 
 | Format | Détection |
 |--------|-----------|
-| `1.2.3.4` | IPv4 → mode multi-sources |
-| `2001:db8::1` | IPv6 → mode multi-sources |
+| `1.2.3.4` | IPv4 → AbuseIPDB · VT · Shodan · Censys · URLhaus · GreyNoise |
+| `2001:db8::1` | IPv6 → idem |
 | `evil.com` | Domaine → VT + URLhaus |
-| `https://...` | URL → mode multi-sources |
+| `https://...` | URL → VT + URLhaus + AbuseIPDB (sur l'IP du host si applicable) |
 | 32 hex chars (MD5) | Hash → VT + URLhaus |
 | 40 hex chars (SHA1) | Hash → VT + URLhaus |
 | 64 hex chars (SHA256) | Hash → VT + URLhaus |
