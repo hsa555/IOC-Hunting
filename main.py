@@ -423,14 +423,18 @@ def fetch_virustotal_hash(h: str, key: str) -> dict:
     return _vt_get_retry(f"/files/{h}", key)
 
 def fetch_crtsh(domain: str, key: str = "") -> dict:
-    """Interroge crt.sh (Certificate Transparency) pour un domaine. Sans clé requise."""
-    url = f"https://crt.sh/?q={urllib.parse.quote(domain, safe='')}&output=json"
+    """Interroge crt.sh (Certificate Transparency) pour un domaine. Sans clé requise.
+    Le tri est effectué côté client sur not_after pour afficher les certs les plus récents."""
+    url = f"https://crt.sh/?q={urllib.parse.quote(domain, safe='')}&output=json&deduplicate=Y"
     req = urllib.request.Request(url)
     req.add_header("User-Agent", "IOCHunting/1.0")
     req.add_header("Accept", "application/json")
     try:
         with urllib.request.urlopen(req, timeout=15) as resp:
-            return {"certs": json.loads(resp.read().decode())}
+            # Tri côté client par not_after décroissant — les certs actifs remontent en premier
+            certs = json.loads(resp.read().decode())
+            certs.sort(key=lambda x: x.get("not_after") or "", reverse=True)
+            return {"certs": certs}
     except urllib.error.HTTPError as e:
         return {"_error": f"HTTP {e.code}"}
     except Exception as e:
@@ -1105,7 +1109,7 @@ def _render_mini_crtsh(data: dict):
     certs = data.get("certs") or []
     if not certs:
         print(f"  {c('crt.sh', BOLD):<28}  {c('aucun certificat trouvé', DIM)}"); return
-    now    = datetime.datetime.utcnow().isoformat()[:10]
+    now    = datetime.datetime.now(datetime.timezone.utc).isoformat()[:10]
     active = sum(1 for ct in certs if (ct.get("not_after") or "") >= now)
     recent = max(certs, key=lambda x: x.get("not_after", ""), default={})
     issuer = recent.get("issuer_name", "")
@@ -1122,7 +1126,7 @@ def render_crtsh_section(data: dict, domain: str):
     certs = data.get("certs") or []
     if not certs: return
 
-    now    = datetime.datetime.utcnow().isoformat()[:10]
+    now    = datetime.datetime.now(datetime.timezone.utc).isoformat()[:10]
     active = sum(1 for ct in certs if (ct.get("not_after") or "") >= now)
     recent = max(certs, key=lambda x: x.get("not_after", ""), default={})
     issuer = recent.get("issuer_name", "")
