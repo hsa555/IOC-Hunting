@@ -1,4 +1,6 @@
 ## 2026-05-29
+- Setup : choix chiffrer ou non les clés API au premier lancement, activable/désactivable ensuite depuis le menu
+- Setup : saisie des clés API visible (plus de masquage Censys)
 - Support des domaines (evil.com) en plus des IPs et URLs
 - Support IPv6
 - Export CSV avec `--export rapport.csv`

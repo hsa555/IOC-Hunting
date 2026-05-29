@@ -26,7 +26,7 @@ from config_loader import (
     CONFIG_FILE, SERVICES,
     load_key, save_key_to_config, all_keys,
     is_encrypted, verify_passphrase, set_passphrase, get_passphrase,
-    _load_all, _save_all, _encrypt,
+    _load_all, _save_all, _encrypt, save_plaintext,
     load_setting, save_setting, clear_cache, is_passphrase_set,
 )
 
@@ -180,14 +180,32 @@ def setup_passphrase():
             print(c("  Passphrase mise a jour et config rechiffree.", GREEN, BOLD))
 
     else:
+        # Demander si l'utilisateur veut chiffrer ou non
+        print()
+        print(f"  {c('Veux-tu chiffrer tes clés API avec une passphrase ?', BOLD, WHITE)}")
+        print()
+        print(f"  {c('Oui', GREEN)}  — Les clés sont illisibles sans la passphrase")
+        print(f"  {c('Non', YELLOW)} — Les clés sont stockées en clair (chmod 600, usage local uniquement)")
+        print()
+        try:
+            enc_choice = input(c("  Chiffrer ? (O/n) › ", CYAN)).strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            print(); sys.exit(0)
+
+        if enc_choice == "n":
+            # Stocker en clair — aucune passphrase définie
+            print(c("  OK — clés en clair.", YELLOW))
+            return
+
+        # L'utilisateur veut chiffrer
         if CONFIG_FILE.exists():
-            print(f"\n  {c('Config en clair detectee — migration vers le chiffrement.', YELLOW)}")
+            print(f"\n  {c('Migration vers le chiffrement.', YELLOW)}")
         else:
-            print(f"\n  {c('Premiere configuration — creation de la passphrase.', DIM)}")
-        print(f"  Cette passphrase chiffrera tes cles API. Ne l'oublie pas.\n")
+            print(f"\n  {c('Création de la passphrase de chiffrement.', DIM)}")
+        print(f"  Ne la perds pas — les clés seront inaccessibles sans elle.\n")
         pp = _prompt_new_passphrase()
         set_passphrase(pp)
-        print(c("  Passphrase definie.", GREEN, BOLD))
+        print(c("  Passphrase définie.", GREEN, BOLD))
 
 # ── setup par service ─────────────────────────────────────────────────────────
 
@@ -218,13 +236,10 @@ def setup_service(service, secret=False):
             if input(c("  Garder cette cle ? (O/n) › ", DIM)).strip().lower() != "n":
                 return existing
 
-    if secret:
-        try:
-            key = getpass.getpass(c("  Personal Access Token › ", CYAN)).strip()
-        except (EOFError, KeyboardInterrupt):
-            print(); return existing or ""
-    else:
-        key = input(c("  Colle ta cle API (vide = ignorer) › ", CYAN)).strip()
+    try:
+        key = input(c("  Personal Access Token › " if secret else "  Colle ta cle API (vide = ignorer) › ", CYAN)).strip()
+    except (EOFError, KeyboardInterrupt):
+        print(); return existing or ""
 
     if not key:
         print(c("  Ignore.", DIM))
@@ -356,9 +371,10 @@ def print_summary():
     print()
     print(f"  Reconfigurer   : {c('python setup.py', CYAN)}")
     print(f"  Analyser       : {c('python main.py <ip-ou-url>', CYAN)}")
-    print(f"  Passphrase     : {c('option 1', BOLD)} prompt interactif  {c('(recommande)', GREEN)}")
-    print(f"                   {c('option 2', BOLD)} {c('THREAT_HUNTING_PASSPHRASE=<pp> python3 main.py', DIM)}  {c('(inline, risque limite)', YELLOW)}")
-    print(f"                   {c('option 3', BOLD)} {c('export THREAT_HUNTING_PASSPHRASE=<pp>', DIM)}  {c('(shell persistent, plus risque)', RED)}")
+    if is_encrypted():
+        print(f"  Passphrase     : {c('option 1', BOLD)} prompt interactif  {c('(recommande)', GREEN)}")
+        print(f"                   {c('option 2', BOLD)} {c('THREAT_HUNTING_PASSPHRASE=<pp> python3 main.py', DIM)}  {c('(inline)', YELLOW)}")
+        print(f"                   {c('option 3', BOLD)} {c('export THREAT_HUNTING_PASSPHRASE=<pp>', DIM)}  {c('(shell persistent)', RED)}")
     sep("═")
     print()
 
@@ -396,6 +412,35 @@ def _unlock():
         sys.exit(0)
     else:
         sys.exit(1)
+
+def _toggle_encryption():
+    """Active ou désactive le chiffrement selon l'état actuel."""
+    if is_encrypted():
+        # Proposer de désactiver
+        print()
+        print(f"  {c('Désactiver le chiffrement', BOLD, WHITE)}")
+        print(c("  Les clés seront sauvegardées en clair (chmod 600).", YELLOW))
+        print()
+        try:
+            ok = input(c("  Confirmer ? (o/N) › ", YELLOW)).strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            print(); return
+        if ok != "o":
+            print(c("  Annulé.", DIM)); return
+        existing = _load_all()
+        save_plaintext(existing)
+        clear_cache()
+        print(c("  Chiffrement désactivé — clés sauvegardées en clair.", GREEN))
+    else:
+        # Activer le chiffrement
+        print()
+        print(f"  {c('Activer le chiffrement Fernet/AES', BOLD, WHITE)}")
+        print(c("  Ne perds pas cette passphrase — les clés seront inaccessibles sans elle.", DIM))
+        existing = _load_all()
+        pp = _prompt_new_passphrase()
+        set_passphrase(pp)
+        _save_all(existing)
+        print(c("  Chiffrement activé.", GREEN, BOLD))
 
 def _change_passphrase():
     """Propose de changer la passphrase (passphrase actuelle déjà en cache mémoire)."""
@@ -491,15 +536,23 @@ def setup_web_port():
 def _run_change_menu():
     """Menu affiché quand une config existe déjà."""
     while True:
+        enc = is_encrypted()
         print()
         sep()
         print(f"  {c('Que veux-tu modifier ?', BOLD, WHITE)}\n")
-        print(f"  {c('1', BOLD)}  Passphrase")
-        print(f"  {c('2', BOLD)}  Clés API")
-        print(f"  {c('3', BOLD)}  Durée du cache")
-        print(f"  {c('4', BOLD)}  Port interface web")
-        print(f"  {c('5', BOLD)}  Tout reconfigurer")
-        print(f"  {c('6', BOLD)}  {c('Reset complet', RED)}  {c('(supprime les clés — nouvelle passphrase)', DIM)}")
+
+        # Option 1 : passphrase si chiffré, ou activer le chiffrement si non chiffré
+        if enc:
+            print(f"  {c('1', BOLD)}  Passphrase")
+            print(f"  {c('2', BOLD)}  Désactiver le chiffrement  {c('(clés en clair)', DIM)}")
+        else:
+            print(f"  {c('1', BOLD)}  Activer le chiffrement  {c('(passphrase Fernet/AES)', DIM)}")
+
+        print(f"  {c('3', BOLD)}  Clés API")
+        print(f"  {c('4', BOLD)}  Durée du cache")
+        print(f"  {c('5', BOLD)}  Port interface web")
+        print(f"  {c('6', BOLD)}  Tout reconfigurer")
+        print(f"  {c('7', BOLD)}  {c('Reset complet', RED)}  {c('(supprime les clés)', DIM)}")
         print(f"  {c('q', BOLD)}  Quitter")
         print()
         try:
@@ -510,21 +563,29 @@ def _run_change_menu():
         if choix == "q":
             break
         elif choix == "1":
-            _change_passphrase()
+            if enc:
+                _change_passphrase()
+            else:
+                _toggle_encryption()  # activer le chiffrement
         elif choix == "2":
-            _run_keys_menu()
+            if enc:
+                _toggle_encryption()  # désactiver le chiffrement
+            else:
+                print(c("  Choix invalide.", DIM))
         elif choix == "3":
-            setup_cache()
+            _run_keys_menu()
         elif choix == "4":
-            setup_web_port()
+            setup_cache()
         elif choix == "5":
+            setup_web_port()
+        elif choix == "6":
             setup_passphrase()
             setup_cache()
             setup_web_port()
             for svc in SERVICES:
                 _setup_any(svc)
             break
-        elif choix == "6":
+        elif choix == "7":
             done = _do_reset()
             if done:
                 break

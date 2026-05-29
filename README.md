@@ -64,9 +64,9 @@ pip install -r requirements.txt
 python3 setup.py
 ```
 
-`setup.py` configure les clés API (chiffrées) et la durée du cache (24h par défaut). À relancer pour modifier une valeur.
+`setup.py` configure les clés API et la durée du cache (24h par défaut). Au premier lancement, il propose de **chiffrer ou non** les clés (Fernet/AES — optionnel). Le chiffrement peut être activé ou désactivé à tout moment depuis le menu. À relancer pour modifier une valeur.
 
-> **Passphrase oubliée ?** Lance `python3 setup.py` et choisis **2 — Reset complet** (accessible sans passphrase). Toutes les clés chiffrées sont supprimées et une nouvelle configuration repart de zéro.
+> **Passphrase oubliée ?** Lance `python3 setup.py` et choisis **Reset complet** (accessible sans passphrase). Toutes les clés chiffrées sont supprimées et une nouvelle configuration repart de zéro.
 
 ---
 
@@ -393,6 +393,18 @@ Si la cible a déjà été analysée dans la durée du cache configurée (24h pa
 - `cryptography >= 41.0.0` (chiffrement Fernet des clés API)
 
 Toutes les autres dépendances (`urllib`, `json`, `argparse`, `hashlib`, `concurrent.futures`, `base64`, `re`, `getpass`) font partie de la bibliothèque standard Python.
+
+---
+
+## Désinstallation
+
+Supprime le dossier du projet, puis les données locales générées par le script :
+
+```bash
+rm -rf ~/.config/ioc_hunting/
+```
+
+Ce dossier contient les clés API (chiffrées ou non), le cache des résultats et les paramètres (port web, durée du cache).
 
 ---
 

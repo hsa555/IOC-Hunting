@@ -228,6 +228,14 @@ def all_keys() -> dict:
         result[svc] = env_val or stored.get(svc, "").strip()
     return result
 
+def save_plaintext(data: dict):
+    """Sauvegarde les clés en clair (sans chiffrement)."""
+    global _data_cache
+    _data_cache = dict(data)
+    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    CONFIG_FILE.write_text(json.dumps(data, indent=2))
+    CONFIG_FILE.chmod(0o600)
+
 def clear_cache():
     """Efface les caches mémoire (passphrase, données déchiffrées, settings)."""
     global _passphrase_cache, _data_cache, _env_consumed, _settings_cache
