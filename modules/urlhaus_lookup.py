@@ -146,7 +146,11 @@ def render(url_target, data, as_json=False):
             sig  = p.get("signature") or "?"
             ftyp = p.get("file_type") or "?"
             vt   = p.get("virustotal_percent")
-            vt_s = c(f"VT:{vt}%", RED, BOLD) if vt and float(vt) > 0 else c("VT:n/a", DIM)
+            try:
+                vt_pos = vt is not None and float(vt) > 0
+            except (TypeError, ValueError):
+                vt_pos = False
+            vt_s = c(f"VT:{vt}%", RED, BOLD) if vt_pos else c("VT:n/a", DIM)
             print(f"  {c(f'{i:>3}.', DIM)} {c(sig, RED, BOLD)}  {c(f'[{ftyp}]', YELLOW)}  {vt_s}")
             if p.get("url"):       print(f"        {c('URL:   ', DIM)} {c(p['url'], CYAN)}")
             if p.get("sha256"):    print(f"        {c('SHA256:', DIM)} {c(p['sha256'], DIM)}")

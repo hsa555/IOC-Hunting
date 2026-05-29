@@ -1,4 +1,10 @@
 ## 2026-05-29
+- Google Dorks : les requêtes SerpAPI sont lancées en parallèle — analyse plus rapide
+- Délai VirusTotal configurable via `setup.py` — le mettre à 0 supprime les pauses avec une clé payante
+- Fichiers de clés, cache et paramètres créés directement en permissions 600
+- Interface web : taille d'upload limitée et nombre de cibles plafonné par analyse
+- Cache des résultats écrit une seule fois par lot — plus rapide sur les grandes listes
+- Un pourcentage VirusTotal non numérique ne fait plus planter l'affichage
 - Setup : choix chiffrer ou non les clés API au premier lancement, activable/désactivable ensuite depuis le menu
 - Setup : saisie des clés API visible (plus de masquage Censys)
 - Support des domaines (evil.com) en plus des IPs et URLs

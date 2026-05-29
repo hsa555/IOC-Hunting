@@ -138,6 +138,22 @@ def get_passphrase(prompt_msg: str = "  Passphrase › ") -> str | None:
         return None
     return pp or None
 
+# ── écriture sécurisée ────────────────────────────────────────────────────────
+
+def _write_secure(path: Path, text: str):
+    """Écrit un fichier avec permissions 0600 posées DÈS la création.
+    Évite la fenêtre TOCTOU de write_text()+chmod() où le fichier existe
+    brièvement avec les permissions du umask (souvent 0644)."""
+    fd = os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as fh:
+        fh.write(text)
+    # Corrige aussi les fichiers pré-existants créés avant ce correctif
+    # (O_CREAT n'applique le mode qu'à la création).
+    try:
+        os.chmod(str(path), 0o600)
+    except OSError:
+        pass
+
 # ── lecture / écriture config ─────────────────────────────────────────────────
 
 def _load_all() -> dict:
@@ -176,14 +192,13 @@ def _load_all() -> dict:
 def _save_all(data: dict):
     global _data_cache
     _data_cache = dict(data)
-    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    CONFIG_DIR.mkdir(parents=True, exist_ok=True, mode=0o700)
     pp = get_passphrase()
     if pp:
         stored = _encrypt(data, pp)
-        CONFIG_FILE.write_text(json.dumps(stored))
+        _write_secure(CONFIG_FILE, json.dumps(stored))
     else:
-        CONFIG_FILE.write_text(json.dumps(data, indent=2))
-    CONFIG_FILE.chmod(0o600)
+        _write_secure(CONFIG_FILE, json.dumps(data, indent=2))
 
 # ── API publique ──────────────────────────────────────────────────────────────
 
@@ -217,8 +232,8 @@ def save_setting(key: str, value):
         except (FileNotFoundError, json.JSONDecodeError):
             _settings_cache = {}
     _settings_cache[key] = value
-    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-    SETTINGS_FILE.write_text(json.dumps(_settings_cache, indent=2))
+    CONFIG_DIR.mkdir(parents=True, exist_ok=True, mode=0o700)
+    _write_secure(SETTINGS_FILE, json.dumps(_settings_cache, indent=2))
 
 def all_keys() -> dict:
     stored = _load_all()
@@ -232,9 +247,8 @@ def save_plaintext(data: dict):
     """Sauvegarde les clés en clair (sans chiffrement)."""
     global _data_cache
     _data_cache = dict(data)
-    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-    CONFIG_FILE.write_text(json.dumps(data, indent=2))
-    CONFIG_FILE.chmod(0o600)
+    CONFIG_DIR.mkdir(parents=True, exist_ok=True, mode=0o700)
+    _write_secure(CONFIG_FILE, json.dumps(data, indent=2))
 
 def clear_cache():
     """Efface les caches mémoire (passphrase, données déchiffrées, settings)."""

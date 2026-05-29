@@ -663,6 +663,13 @@ def create_app(keys: dict, cache: dict | None, fns: dict, port: int):
 
     app = Flask(__name__, static_folder=None)
     app.secret_key = secrets.token_hex(32)
+    app.config['MAX_CONTENT_LENGTH'] = 5 * 1024 * 1024  # 5 MB max par requête (anti-OOM)
+
+    MAX_TARGETS = 50  # plafond de cibles par analyse (évite un flood d'appels API)
+
+    @app.errorhandler(413)
+    def _too_large(e):
+        return jsonify({'error': 'Fichier trop volumineux (max 5 MB).'}), 413
 
     @app.route('/')
     def index():
@@ -670,7 +677,7 @@ def create_app(keys: dict, cache: dict | None, fns: dict, port: int):
 
     @app.route('/analyze', methods=['POST'])
     def analyze():
-        if request.form.get('csrf_token') != _CSRF_TOKEN:
+        if not secrets.compare_digest(request.form.get('csrf_token') or '', _CSRF_TOKEN):
             return jsonify({'error': 'Token CSRF invalide'}), 403
 
         year_str     = (request.form.get('year') or '').strip()
@@ -709,6 +716,21 @@ def create_app(keys: dict, cache: dict | None, fns: dict, port: int):
             n = len(targets)
             target_label = targets[0] if n == 1 else f"{n} cibles"
 
+        # Filtrage serveur : ne garde que les cibles reconnues (IP, URL, domaine, hash).
+        # Doublon défensif de la validation CLI — évite d'envoyer du bruit aux APIs.
+        is_valid = fns.get('is_valid_target')
+        if is_valid:
+            valid_targets = [t for t in targets if is_valid(t)]
+            if not valid_targets:
+                return jsonify({'error': 'Aucune cible valide (IP, URL, domaine ou hash).'}), 400
+            targets = valid_targets
+
+        # Plafond : protège contre un flood d'appels API depuis un gros upload.
+        if len(targets) > MAX_TARGETS:
+            return jsonify({
+                'error': f'Trop de cibles ({len(targets)}). Maximum {MAX_TARGETS} par analyse.'
+            }), 400
+
         # Capture stdout par cible pour obtenir un bloc HTML indépendant par carte
         blocks      = []
         all_results = []
@@ -716,12 +738,14 @@ def create_app(keys: dict, cache: dict | None, fns: dict, port: int):
             buf = io.StringIO()
             try:
                 with redirect_stdout(buf):
+                    # save_cache=False : on écrit le cache une seule fois après la boucle
                     if fns['is_hash'](tgt):
-                        res = fns['hash']([tgt], keys, cache=active_cache)
+                        res = fns['hash']([tgt], keys, cache=active_cache, save_cache=False)
                         if res:
                             all_results.extend(res)
                     else:
-                        res = fns['correlation'](tgt, keys, years=years, cache=active_cache)
+                        res = fns['correlation'](tgt, keys, years=years, cache=active_cache,
+                                                 save_cache=False)
                         if res:
                             all_results.append(res)
             except Exception as e:
@@ -737,6 +761,10 @@ def create_app(keys: dict, cache: dict | None, fns: dict, port: int):
                 'html':   _ansi_to_html(output),
                 'cached': '(cache)' in output,  # détecté depuis la sortie texte de render_summary
             })
+
+        # Écriture disque unique du cache pour tout le lot web (cf. O1)
+        if active_cache is not None and fns.get('save_cache'):
+            fns['save_cache'](active_cache)
 
         return jsonify({
             'blocks':       blocks,

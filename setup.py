@@ -493,6 +493,7 @@ def _do_reset() -> bool:
     setup_passphrase()
     setup_cache()
     setup_web_port()
+    setup_vt_delay()
     for svc in SERVICES:
         _setup_any(svc)
     return True
@@ -533,6 +534,28 @@ def setup_web_port():
     else:
         print(c("  Port invalide — inchangé (doit être entre 1024 et 65535).", YELLOW))
 
+def setup_vt_delay():
+    """Configure le délai entre requêtes VirusTotal (rate limit free tier)."""
+    try:
+        current = int(load_setting("vt_rate_delay", 16))
+    except (TypeError, ValueError):
+        current = 16
+    print()
+    sep()
+    print(f"  {c('Délai VirusTotal (rate limit)', BOLD, WHITE)}")
+    print(f"  {c('Délai actuel :', DIM)} {c(f'{current}s', WHITE)}")
+    print(f"  {c('Free tier VT = 4 req/min → 16s recommandé.', DIM)}")
+    print(f"  {c('Clé payante → 0 pour supprimer les pauses (le backoff 429 reste actif).', DIM)}")
+    print()
+    raw = input(c("  Délai en secondes  (Entrée = garder, 0 = aucun) › ", CYAN)).strip()
+    if not raw:
+        return
+    if raw.isdigit():
+        save_setting("vt_rate_delay", int(raw))
+        print(c(f"  Délai VT configuré : {raw}s", GREEN, BOLD))
+    else:
+        print(c("  Valeur invalide — inchangé (entier ≥ 0 attendu).", YELLOW))
+
 def _run_change_menu():
     """Menu affiché quand une config existe déjà."""
     while True:
@@ -551,8 +574,9 @@ def _run_change_menu():
         print(f"  {c('3', BOLD)}  Clés API")
         print(f"  {c('4', BOLD)}  Durée du cache")
         print(f"  {c('5', BOLD)}  Port interface web")
-        print(f"  {c('6', BOLD)}  Tout reconfigurer")
-        print(f"  {c('7', BOLD)}  {c('Reset complet', RED)}  {c('(supprime les clés)', DIM)}")
+        print(f"  {c('6', BOLD)}  Délai VirusTotal  {c('(rate limit)', DIM)}")
+        print(f"  {c('7', BOLD)}  Tout reconfigurer")
+        print(f"  {c('8', BOLD)}  {c('Reset complet', RED)}  {c('(supprime les clés)', DIM)}")
         print(f"  {c('q', BOLD)}  Quitter")
         print()
         try:
@@ -579,13 +603,16 @@ def _run_change_menu():
         elif choix == "5":
             setup_web_port()
         elif choix == "6":
+            setup_vt_delay()
+        elif choix == "7":
             setup_passphrase()
             setup_cache()
             setup_web_port()
+            setup_vt_delay()
             for svc in SERVICES:
                 _setup_any(svc)
             break
-        elif choix == "7":
+        elif choix == "8":
             done = _do_reset()
             if done:
                 break
@@ -620,6 +647,7 @@ def main():
         # Première configuration → flow séquentiel complet
         setup_passphrase()
         setup_cache()
+        setup_vt_delay()
         for svc in SERVICES:
             _setup_any(svc)
 

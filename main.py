@@ -139,6 +139,14 @@ def ts_to_year(ts) -> int | None:
     except Exception:
         return None
 
+def _pct_positive(v) -> bool:
+    """True si v représente un pourcentage numérique > 0.
+    Tolère None, '', ou une valeur non numérique renvoyée par l'API (pas de crash)."""
+    try:
+        return float(v) > 0
+    except (TypeError, ValueError):
+        return False
+
 # ── cache ──────────────────────────────────────────────────────────────────────
 # Stocke les résultats d'analyse dans ~/.config/ioc_hunting/cache.json
 # Format : { "cible|years": {"ts": float, "data": {...}} }
@@ -148,6 +156,11 @@ def ts_to_year(ts) -> int | None:
 _CACHE_FILE = os.path.expanduser("~/.config/ioc_hunting/cache.json")
 _CACHE_MAX  = 500   # nombre max d'entrées avant avertissement
 _CACHE_TTL  = 86400 # durée par défaut (24h) — remplacée au lancement par la config
+
+# Délai (s) entre requêtes VT pour respecter le rate limit (free tier = 4 req/min → 16s).
+# 0 = aucune pause (clé payante). Remplacé au lancement par la config (vt_rate_delay).
+# Le backoff réactif sur 429 (vt_get_retry) reste actif quelle que soit cette valeur.
+_VT_RATE_DELAY = 16
 
 def _cache_load() -> dict:
     # Retourne {} si le fichier n'existe pas encore ou est corrompu
@@ -162,7 +175,9 @@ def _cache_save(cache: dict):
     # même si Ctrl+C intervient pendant la sauvegarde
     os.makedirs(os.path.dirname(_CACHE_FILE), exist_ok=True)
     tmp = _CACHE_FILE + ".tmp"
-    with open(tmp, "w") as fh:
+    # Perms 0600 posées dès la création du .tmp ; os.replace les préserve.
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as fh:
         json.dump(cache, fh, separators=(",", ":"))
     os.replace(tmp, _CACHE_FILE)
 
@@ -845,7 +860,7 @@ def render_urlhaus_hashes(data, show_offline=False):
         if md5:
             print(f"         {c('MD5     :', DIM)}  {c(md5, DIM)}")
         if vt_r:
-            col = RED if vt_p and float(vt_p) > 0 else DIM
+            col = RED if _pct_positive(vt_p) else DIM
             print(f"         {c('VT      :', DIM)}  {c(f'{vt_r}  ({vt_p}%)', col)}")
         print()
     if hidden:
@@ -1026,7 +1041,7 @@ def render_urlhaus_hash_section(data: dict):
     vt_info = data.get("virustotal") or {}
     if vt_info.get("result"):
         pct = vt_info.get("percent", "")
-        col = RED if pct and float(pct) > 0 else DIM
+        col = RED if _pct_positive(pct) else DIM
         pct_s = f"  {c(f'({pct}%)', DIM)}" if pct else ""
         print(f"  {'VT (URLhaus)':<26} {c(vt_info['result'], col)}{pct_s}")
 
@@ -1259,7 +1274,7 @@ def render_details(target, kind, results, years=None, as_json=False, show_offlin
 # ── orchestration ──────────────────────────────────────────────────────────────
 
 def run_correlation(target, keys, as_json=False, years=None, cache=None, show_offline=False,
-                    quiet: bool = False):
+                    quiet: bool = False, save_cache: bool = True):
     """Analyse principale pour une IP ou URL.
     Phase 1 : fetch en parallèle de toutes les sources applicables.
     Phase 1b : si URLhaus ne retourne pas de payloads inline, les récupère URL par URL.
@@ -1370,7 +1385,8 @@ def run_correlation(target, keys, as_json=False, years=None, cache=None, show_of
             ("vt_referrer_files",      f"/ip_addresses/{urllib.parse.quote(target, safe='')}/referrer_files",      "referrer files"),
         ]:
             print(c(f"  Fetch VT {label}...", DIM), end="\r", flush=True)
-            time.sleep(16)
+            if _VT_RATE_DELAY:
+                time.sleep(_VT_RATE_DELAY)
             try:
                 items, count = _vt_relationship(rel_path, vt_key)
                 filtered = filter_vt_files(items, years=years, min_malicious=1)
@@ -1387,10 +1403,12 @@ def run_correlation(target, keys, as_json=False, years=None, cache=None, show_of
 
     result = {"target": target, "type": kind, "score": score, "results": results}
 
-    # Sauvegarde en cache — ignoré si la cible contient un espace (entrée malformée)
+    # Sauvegarde en cache — ignoré si la cible contient un espace (entrée malformée).
+    # save_cache=False : l'appelant gère l'écriture disque en une fois (scan en masse).
     if cache is not None and ' ' not in target:
         _cache_set(cache, _cache_key(target, years), result)
-        _cache_save(cache)
+        if save_cache:
+            _cache_save(cache)
 
     return result
 
@@ -1436,7 +1454,7 @@ def _render_hash_result(h: str, results: dict, score: int, signals: list, cached
 
 # ── hash correlation ───────────────────────────────────────────────────────────
 
-def run_hash_correlation(targets: list, keys: dict, as_json: bool = False, export_path: str = None, cache: dict = None, quiet: bool = False) -> list:
+def run_hash_correlation(targets: list, keys: dict, as_json: bool = False, export_path: str = None, cache: dict = None, quiet: bool = False, save_cache: bool = True) -> list:
     """Analyse une liste de hashes (MD5/SHA1/SHA256) via VT + URLhaus en parallèle.
     16s de pause entre chaque hash pour respecter le rate limit VT (4 req/min).
     Retourne la liste de tous les résultats ; exporte en JSON si export_path fourni."""
@@ -1457,8 +1475,8 @@ def run_hash_correlation(targets: list, keys: dict, as_json: bool = False, expor
                 all_results.append(hit)
                 continue  # passe au hash suivant sans dormir
 
-        if i > 0:
-            time.sleep(16)  # VT free tier : 4 req/min
+        if i > 0 and _VT_RATE_DELAY:
+            time.sleep(_VT_RATE_DELAY)  # VT free tier : 4 req/min (0 = clé payante)
 
         results = {}
         errors  = {}
@@ -1491,12 +1509,17 @@ def run_hash_correlation(targets: list, keys: dict, as_json: bool = False, expor
 
         result = {"target": h, "type": "hash", "score": score, "results": results}
 
-        # Sauvegarde en cache — ignoré si le hash contient un espace (entrée malformée)
+        # Mise à jour du cache en mémoire — ignoré si le hash contient un espace.
+        # L'écriture disque est faite une seule fois après la boucle (voir plus bas).
         if cache is not None and ' ' not in h:
             _cache_set(cache, h, result)
-            _cache_save(cache)
 
         all_results.append(result)
+
+    # Une seule écriture disque pour tout le lot (au lieu d'une par hash).
+    # save_cache=False : l'appelant (web) gère l'écriture après son propre lot.
+    if cache is not None and save_cache:
+        _cache_save(cache)
 
     if _n > 1 and not as_json and not quiet:
         _clear_progress()
@@ -1772,10 +1795,12 @@ def _launch_web(keys: dict, cache):
             continue
         break
     app = create_app(keys, cache, {
-        'correlation': run_correlation,
-        'hash':        run_hash_correlation,
-        'is_hash':     is_hash,
-        'parse_years': parse_years,
+        'correlation':     run_correlation,
+        'hash':            run_hash_correlation,
+        'is_hash':         is_hash,
+        'is_valid_target': is_valid_target,
+        'parse_years':     parse_years,
+        'save_cache':      _cache_save,
     }, port)
     print(c(f"\n  Interface web disponible sur ", DIM) + c(f"http://127.0.0.1:{port}", CYAN, BOLD))
     print(c("  Ctrl+C pour arrêter.\n", DIM))
@@ -1919,8 +1944,14 @@ def main():
     keys = all_keys()
 
     # Charge le TTL depuis settings.json (sans passphrase) — fallback 24h si absent
-    global _CACHE_TTL
+    global _CACHE_TTL, _VT_RATE_DELAY
     _CACHE_TTL = int(load_setting("cache_ttl") or 86400)
+
+    # Délai VT (rate limit) — 0 autorisé (clé payante), donc pas de `or` qui masquerait 0
+    try:
+        _VT_RATE_DELAY = max(0, int(load_setting("vt_rate_delay", 16)))
+    except (TypeError, ValueError):
+        _VT_RATE_DELAY = 16
 
     # Charge le cache et purge les entrées expirées selon _CACHE_TTL
     # --nocache désactive complètement le cache pour cette session
@@ -2007,9 +2038,13 @@ def main():
         for _i, target in enumerate(targets):
             if _n > 1 and not args.json and not args.quiet:
                 _show_progress(_i + 1, _n, target)
+            # save_cache=False : on écrit le cache une seule fois après la boucle
             r = run_correlation(target, keys, as_json=args.json, years=years, cache=cache,
-                                show_offline=args.offline, quiet=args.quiet)
+                                show_offline=args.offline, quiet=args.quiet, save_cache=False)
             all_results.append(r)
+        # Écriture disque unique du cache pour tout le lot (persiste aussi la purge initiale)
+        if cache is not None:
+            _cache_save(cache)
         if _n > 1 and not args.json and not args.quiet:
             _clear_progress()
         if args.export:

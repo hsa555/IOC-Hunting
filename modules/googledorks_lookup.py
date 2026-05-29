@@ -17,6 +17,7 @@ import argparse
 import urllib.request
 import urllib.parse
 import urllib.error
+from concurrent.futures import ThreadPoolExecutor
 
 import sys as _sys, os as _os
 _path = _os.path.join(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))), ".internal")
@@ -135,41 +136,45 @@ def _serpapi_search(q: str, api_key: str, num: int = 10, start: int = 0) -> dict
 
 def query(target: str, api_key: str, num: int = 10) -> dict:
     """
-    4 requêtes SerpAPI :
+    5 requêtes SerpAPI, lancées en parallèle (ThreadPoolExecutor) :
       1. page 1 (start=0)  — IP exacte avec exclusions
       2. page 2 (start=10) — IP exacte avec exclusions
       3. IP exacte SANS exclusions — capte ce que Google montre nativement
-      4. IP + filetype:txt  — raw IP lists, blocklists, CTI feeds texte (ex: sanyal.org/mirai-ips.txt)
+      4. IP + filetype:txt page 1  — raw IP lists, blocklists, CTI feeds texte
+      5. IP + filetype:txt page 2  — (ex: sanyal.org/mirai-ips.txt)
+    La déduplication respecte l'ordre ci-dessus (1→5), identique à la version
+    séquentielle : seul l'ordre des appels réseau change, pas le résultat.
     """
+    bq      = _build_query(target)
+    clean_q = f'"{target}"'
+    txt_q   = f'"{target}" filetype:txt'
+    # (requête, start, marqueur _filetype_txt) — l'ordre = priorité de déduplication
+    specs = [
+        (bq,      0,  False),
+        (bq,      10, False),
+        (clean_q, 0,  False),
+        (txt_q,   0,  True),
+        (txt_q,   10, True),
+    ]
+
+    # Lancement parallèle ; pool.map préserve l'ordre des specs dans les réponses.
+    with ThreadPoolExecutor(max_workers=len(specs)) as pool:
+        responses = list(pool.map(
+            lambda s: _serpapi_search(s[0], api_key, num=num, start=s[1]),
+            specs,
+        ))
+
     items = []
     seen  = set()
-
-    for start in (0, 10):
-        data = _serpapi_search(_build_query(target), api_key, num=num, start=start)
-        for item in (data.get("organic_results") or []):
+    for (_q, _start, is_txt), resp in zip(specs, responses):
+        for item in (resp.get("organic_results") or []):
             link = item.get("link")
             if link not in seen:
                 seen.add(link)
-                items.append(item)
+                items.append({**item, "_filetype_txt": True} if is_txt else item)
 
-    # Requête sans exclusions — résultats Google natifs
-    clean = _serpapi_search(f'"{target}"', api_key, num=num, start=0)
-    for item in (clean.get("organic_results") or []):
-        link = item.get("link")
-        if link not in seen:
-            seen.add(link)
-            items.append(item)
-
-    # Requête filetype:txt — 2 pages — raw IP lists et blocklists en fichiers texte
-    for start in (0, 10):
-        txt = _serpapi_search(f'"{target}" filetype:txt', api_key, num=num, start=start)
-        for item in (txt.get("organic_results") or []):
-            link = item.get("link")
-            if link not in seen:
-                seen.add(link)
-                items.append({**item, "_filetype_txt": True})
-
-    total = data.get("search_information", {}).get("total_results", "")
+    # total : réponse de _build_query page 2 (start=10) — même source qu'avant
+    total = responses[1].get("search_information", {}).get("total_results", "")
     return {"organic_results": items, "total": total}
 
 def _domain(url: str) -> str:

@@ -183,7 +183,7 @@ python3 modules/googledorks_lookup.py 1.2.3.4
 python3 modules/googledorks_lookup.py 1.2.3.4 --num 20
 ```
 
-- **Clé SerpAPI** : plan gratuit = **100 requêtes/mois** (3 req par analyse : page 1 + page 2 + sous-réseau /24). Configure via `python setup.py`.
+- **Clé SerpAPI** : plan gratuit = **100 requêtes/mois** (5 req par analyse, lancées en parallèle : IP exacte pages 1-2 + IP sans exclusions + filetype:txt pages 1-2). Configure via `python setup.py`.
 - **Filtrage** : les scanners d'IP (ipinfo, AbuseIPDB, Shodan…) et blacklists sont exclus automatiquement. Les résultats contenant des mots-clés CTI (botnet, malware, phishing, APT…) remontent en premier.
 
 ### Hachage de fichiers locaux (mode hash)
@@ -380,6 +380,8 @@ Si la cible a déjà été analysée dans la durée du cache configurée (24h pa
 ## Limitations
 
 - **VirusTotal plan gratuit** : 4 requêtes/minute, 500/jour. Le script attend automatiquement sur rate limit (429). L'analyse de plusieurs hashes consécutifs prend ~16 secondes entre chaque.
+  - Ce délai est **configurable via `python3 setup.py`** (option *Délai VirusTotal*). Valeur par défaut : `16` secondes.
+  - Avec une **clé API VirusTotal payante** (Premium), il faut le réduire — le mettre à `0` pour supprimer complètement les pauses entre requêtes. Le backoff automatique sur 429 reste actif dans tous les cas.
 - **Shodan plan gratuit** : accès limité aux données indexées via `/shodan/host/{ip}`. Sans clé, fallback automatique sur InternetDB.
 - **AbuseIPDB** : 1 000 requêtes/jour (plan gratuit).
 - **Censys** : 250 requêtes/mois (plan gratuit).
@@ -404,7 +406,7 @@ Supprime le dossier du projet, puis les données locales générées par le scri
 rm -rf ~/.config/ioc_hunting/
 ```
 
-Ce dossier contient les clés API (chiffrées ou non), le cache des résultats et les paramètres (port web, durée du cache).
+Ce dossier contient les clés API (chiffrées ou non), le cache des résultats et les paramètres (port web, durée du cache, délai VirusTotal).
 
 ---
 
