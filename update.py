@@ -130,6 +130,42 @@ def cmd_update():
     print(" " * 40, end="\r")
 
     if r_pull.returncode != 0:
+        # Vérifier si c'est une divergence d'historique (force push upstream)
+        upstream = _upstream()
+        base = _git("merge-base", "HEAD", upstream).stdout.strip()
+        local = _git("rev-parse", "HEAD").stdout.strip()
+        remote = _git("rev-parse", upstream).stdout.strip()
+        diverged = base != local and base != remote
+
+        if diverged:
+            print(c("\n  L'historique distant a été réécrit (force push).", YELLOW, BOLD))
+            print(c("  Ton dépôt local a divergé — un simple pull est impossible.", DIM))
+            print()
+            try:
+                ok2 = input(c("  Écraser le local avec la version distante ? (O/n) › ", DIM)).strip().lower()
+            except EOFError:
+                ok2 = "n"
+            if ok2 != "n":
+                r_reset = _git("reset", "--hard", upstream)
+                if r_reset.returncode == 0:
+                    if stashed:
+                        r_pop = _git("stash", "pop", "--quiet")
+                        if r_pop.returncode != 0:
+                            print(c("  Avertissement : impossible de restaurer le stash.", YELLOW))
+                    h, d = _current_info()
+                    print(f"\n  {c('✓  Mise à jour forcée réussie !', GREEN, BOLD)}")
+                    print(f"  {c('Nouvelle version', BOLD)}  {c(h, CYAN)}  {c(d, DIM)}")
+                    print(c(f"\n  Pour revenir en arrière :  python update.py --rollback", DIM))
+                    sep()
+                    return
+                else:
+                    print(c(f"\n  Erreur : {r_reset.stderr.strip()}", RED))
+            else:
+                print(c("  Mise à jour annulée.\n", DIM))
+            if stashed:
+                _git("stash", "pop", "--quiet")
+            return
+
         print(c(f"\n  Erreur lors de la mise à jour :\n  {r_pull.stderr.strip()}", RED))
         print(c(f"\n  Le backup {tag} est disponible (--rollback).", YELLOW))
         if stashed:
